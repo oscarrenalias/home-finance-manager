@@ -53,6 +53,16 @@ _DUPLICATE_ROWS_CSV = textwrap.dedent("""\
     "15.04.2024";"Groceries";"Food";"test_import_duplicate_rows_both_visible Supermarket";"-33,00";"667,00";"Executed";""
 """)
 
+# 2-row CSV with 2025 dates where row 2's balance is deliberately inconsistent.
+# Row 1: balance=800,00; Row 2: amount=-15,00 → correct balance would be 785,00,
+# but the CSV supplies 790,00, creating an arithmetic mismatch.
+# Unique year (2025) and test-name prefix prevent collision with other tests.
+_BALANCE_MISMATCH_CSV = textwrap.dedent("""\
+    "Date";"Category";"Subcategory";"Text";"Amount";"Balance";"Status";"Reconciled"
+    "10.08.2025";"Groceries";"Food";"test_import_balance_mismatch_shows_warning Supermarket";"-20,00";"800,00";"Executed";""
+    "11.08.2025";"Transport";"Bus";"test_import_balance_mismatch_shows_warning Transit";"-15,00";"790,00";"Executed";""
+""")
+
 # 3-row CSV with 2023 dates, all rows Pending with empty Balance.
 # Dates and descriptions are unique to this test to avoid collision with other tests.
 _PENDING_ONLY_CSV = textwrap.dedent("""\
@@ -310,3 +320,41 @@ def test_import_duplicate_rows_both_visible(
     assert row_count >= 2, (
         f"Expected at least 2 preview rows for duplicate CSV, got {row_count}"
     )
+
+
+def test_import_balance_mismatch_shows_warning(
+    page: Page, app_server: str, tmp_path: Path
+) -> None:
+    """Upload a CSV with a deliberate balance arithmetic inconsistency.
+
+    Row 1 balance (800.00) + row 2 amount (-15.00) = 785.00, but the CSV
+    supplies 790.00 for row 2's balance. The preview panel must surface the
+    balance-check-mismatch warning before any commit action is taken.
+    """
+    csv_file = tmp_path / "balance_mismatch.csv"
+    csv_file.write_text(_BALANCE_MISMATCH_CSV, encoding="utf-8")
+
+    page.goto(f"{app_server}/import")
+    page.wait_for_load_state("networkidle")
+
+    # Wait for accounts to load before interacting with the dropdown.
+    expect(page.get_by_test_id("account-select")).not_to_have_text(
+        "Select account", timeout=15_000
+    )
+
+    # Select the Common account.
+    page.get_by_test_id("account-select").click()
+    page.get_by_test_id(_COMMON_ACCOUNT_TESTID).click()
+
+    # Upload the CSV with the deliberate balance inconsistency.
+    page.get_by_test_id("csv-upload").locator('input[type="file"]').set_input_files(
+        str(csv_file)
+    )
+
+    # Preview table must appear before the mismatch warning assertion.
+    expect(page.get_by_test_id("preview-table")).to_be_visible(
+        timeout=_UPLOAD_TIMEOUT_MS
+    )
+
+    # The balance mismatch warning must be visible before the user commits.
+    expect(page.get_by_test_id("balance-check-mismatch")).to_be_visible()
