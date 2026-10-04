@@ -50,3 +50,26 @@ A bead is too large if it:
 - Has acceptance criteria that require multiple distinct implementation steps
 
 Split large beads at natural seams (e.g. data layer vs API layer, backend vs frontend).
+
+## UI Test Deliverables
+
+Browser-level UI tests use [Playwright](https://playwright.dev/python/) via `pytest-playwright` and live under `tests/ui/`.
+
+Fixtures are provided by `tests/ui/conftest.py`:
+
+- **`app_server`** — session-scoped fixture that starts the Reflex dev server and yields its base URL.
+- **`page`** — function-scoped Playwright `Page` object (provided by `pytest-playwright`).
+
+### Minimal test stub
+
+```python
+from playwright.sync_api import Page
+
+
+def test_overview_loads(page: Page, app_server: str) -> None:
+    page.goto(app_server)
+    heading = page.get_by_test_id("overview-heading")
+    assert heading.is_visible()
+```
+
+The `app_server` fixture is declared in `tests/ui/conftest.py` and automatically available to all tests under `tests/ui/`. No explicit import is needed.
