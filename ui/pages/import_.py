@@ -136,6 +136,126 @@ class ImportState(rx.State):
                 self.committing = False
 
 
+def _error_banner() -> rx.Component:
+    return rx.cond(
+        ImportState.error_message,
+        rx.callout(
+            ImportState.error_message,
+            color_scheme="red",
+            width="100%",
+        ),
+        rx.fragment(),
+    )
+
+
+def _account_selector() -> rx.Component:
+    return rx.vstack(
+        rx.text("Account", weight="medium", size="2"),
+        rx.select.root(
+            rx.select.trigger(placeholder="Select account"),
+            rx.select.content(
+                rx.foreach(
+                    ImportState.account_options,
+                    lambda opt: rx.select.item(opt[1], value=opt[0]),
+                ),
+            ),
+            value=ImportState.selected_account_id,
+            on_change=ImportState.set_selected_account_id,
+            width="300px",
+        ),
+        align="start",
+        gap="0.5em",
+    )
+
+
+def _upload_area() -> rx.Component:
+    return rx.vstack(
+        rx.text("CSV file", weight="medium", size="2"),
+        rx.upload(
+            rx.vstack(
+                rx.icon("upload", size=24),
+                rx.text("Drop a CSV file here, or click to browse"),
+                rx.text("Single .csv file · max 10 MB", size="1", color_scheme="gray"),
+                align="center",
+                gap="0.5em",
+            ),
+            id="csv_upload",
+            accept={"text/csv": [".csv"]},
+            max_files=1,
+            max_size=10 * 1024 * 1024,
+            border="2px dashed var(--gray-6)",
+            border_radius="0.5em",
+            padding="2em",
+            width="100%",
+            text_align="center",
+            cursor="pointer",
+            _hover={"border_color": "var(--accent-6)"},
+        ),
+        rx.button(
+            "Upload and preview",
+            on_click=ImportState.handle_upload(
+                rx.upload_files(upload_id="csv_upload")
+            ),
+            disabled=ImportState.selected_account_id == "",
+        ),
+        align="start",
+        gap="0.75em",
+        width="100%",
+    )
+
+
+def _coverage_fields() -> rx.Component:
+    return rx.vstack(
+        rx.text("Coverage period", weight="medium", size="2"),
+        rx.hstack(
+            rx.vstack(
+                rx.text("Start date", size="1", color_scheme="gray"),
+                rx.input(
+                    placeholder="YYYY-MM-DD",
+                    value=ImportState.coverage_start,
+                    on_change=ImportState.set_coverage_start,
+                    width="160px",
+                ),
+                align="start",
+                gap="0.25em",
+            ),
+            rx.vstack(
+                rx.text("End date", size="1", color_scheme="gray"),
+                rx.input(
+                    placeholder="YYYY-MM-DD",
+                    value=ImportState.coverage_end,
+                    on_change=ImportState.set_coverage_end,
+                    width="160px",
+                ),
+                align="start",
+                gap="0.25em",
+            ),
+            gap="1em",
+            align="start",
+        ),
+        align="start",
+        gap="0.5em",
+    )
+
+
+def _completeness_checkbox() -> rx.Component:
+    return rx.hstack(
+        rx.checkbox(
+            checked=ImportState.completeness,
+            on_change=ImportState.set_completeness,
+        ),
+        rx.tooltip(
+            rx.text("Complete export", size="2"),
+            content=(
+                "Check this if the CSV covers the entire coverage period with no gaps. "
+                "Used to detect missing transactions between imports."
+            ),
+        ),
+        align="center",
+        gap="0.5em",
+    )
+
+
 @rx.page(
     route="/import",
     title="Import | Home Finance",
@@ -143,6 +263,16 @@ class ImportState(rx.State):
 )
 def import_page() -> rx.Component:
     return shell(
-        rx.heading("Import", size="7"),
-        rx.text("CSV statement import — coming soon.", color_scheme="gray"),
+        rx.vstack(
+            rx.heading("Import", size="7"),
+            _error_banner(),
+            _account_selector(),
+            _upload_area(),
+            _coverage_fields(),
+            _completeness_checkbox(),
+            align="start",
+            gap="1.5em",
+            width="100%",
+            max_width="640px",
+        )
     )
