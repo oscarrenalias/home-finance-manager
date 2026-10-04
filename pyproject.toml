@@ -1,0 +1,40 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "home-finance-analysis"
+version = "0.1.0"
+description = "Private household finance analysis application"
+requires-python = ">=3.11"
+dependencies = [
+    # UI + backend framework (generates React frontend from Python)
+    "reflex>=0.6.0,<0.8",
+    # Data access layer
+    "sqlalchemy>=2.0.36,<3.0",
+    "alembic>=1.13.0,<2.0",
+    # Validation
+    "pydantic>=2.9.0,<3.0",
+    # LLM orchestration
+    "langchain>=0.3.0,<0.4",
+    "langchain-core>=0.3.0,<0.4",
+    "langchain-openai>=0.2.0,<0.3",
+    # LLM proxy / model routing (OpenAI-compatible endpoints)
+    "litellm>=1.50.0,<2.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0,<9.0",
+    "pytest-asyncio>=0.23.0,<1.0",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["ui", "domain", "services", "storage", "llm", "jobs"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.uv.workspace]
+members = []
