@@ -1,0 +1,14 @@
+# LiteLLM proxy model routing for home finance analysis.
+# API keys are read from environment variables — no secrets in this file.
+# Adjust model names under litellm_params.model to match your provider and plan.
+
+model_list:
+  - model_name: classifier
+    litellm_params:
+      model: openai/gpt-4o-mini
+      api_key: os.environ/OPENAI_API_KEY
+
+  - model_name: analyst
+    litellm_params:
+      model: openai/gpt-4o
+      api_key: os.environ/OPENAI_API_KEY
