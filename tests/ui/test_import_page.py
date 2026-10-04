@@ -45,6 +45,15 @@ _BAD_HEADER_CSV = textwrap.dedent("""\
     2026-01-01,Food,K-Supermarket
 """)
 
+# 3-row CSV with 2023 dates, all rows Pending with empty Balance.
+# Dates and descriptions are unique to this test to avoid collision with other tests.
+_PENDING_ONLY_CSV = textwrap.dedent("""\
+    "Date";"Category";"Subcategory";"Text";"Amount";"Balance";"Status";"Reconciled"
+    "01.07.2023";"Groceries";"Food";"test_import_pending_only_shows_pending_stat Supermarket";"-18,00";"";"Pending";""
+    "02.07.2023";"Transport";"Bus";"test_import_pending_only_shows_pending_stat Transit";"-7,00";"";"Pending";""
+    "03.07.2023";"Shopping";"Other";"test_import_pending_only_shows_pending_stat Store";"-11,00";"";"Pending";""
+""")
+
 _UPLOAD_TIMEOUT_MS = 30_000
 _COMMIT_TIMEOUT_MS = 30_000
 
@@ -200,3 +209,56 @@ def test_reimport_same_file_blocked(
 
     # Commit button must be disabled — reimporting the same file is blocked.
     expect(page.get_by_test_id("commit-btn")).to_be_disabled()
+
+
+def test_import_pending_only_shows_pending_stat(
+    page: Page, app_server: str, tmp_path: Path
+) -> None:
+    """Upload a CSV where every row is Pending with empty Balance.
+
+    Asserts that the preview shows a non-zero pending count and zero new-transaction
+    count, and that the commit button is enabled (pending rows are valid to commit).
+    """
+    csv_file = tmp_path / "pending_only.csv"
+    csv_file.write_text(_PENDING_ONLY_CSV, encoding="utf-8")
+
+    page.goto(f"{app_server}/import")
+    page.wait_for_load_state("networkidle")
+
+    # Wait for accounts to load before interacting with the dropdown.
+    expect(page.get_by_test_id("account-select")).not_to_have_text(
+        "Select account", timeout=15_000
+    )
+
+    # Select the Common account.
+    page.get_by_test_id("account-select").click()
+    page.get_by_test_id(_COMMON_ACCOUNT_TESTID).click()
+
+    # Upload the pending-only CSV.
+    page.get_by_test_id("csv-upload").locator('input[type="file"]').set_input_files(
+        str(csv_file)
+    )
+
+    # Preview table must appear before assertions.
+    expect(page.get_by_test_id("preview-table")).to_be_visible(
+        timeout=_UPLOAD_TIMEOUT_MS
+    )
+
+    # Pending stat must be non-zero (3 pending rows).
+    pending_stat = page.get_by_test_id("preview-stat-pending")
+    expect(pending_stat).to_be_visible()
+    pending_text = pending_stat.inner_text()
+    assert int(pending_text.strip()) > 0, (
+        f"Expected preview-stat-pending to be non-zero, got {pending_text!r}"
+    )
+
+    # New-transaction stat must be zero (all rows are pending, none are executed).
+    new_stat = page.get_by_test_id("preview-stat-new")
+    expect(new_stat).to_be_visible()
+    new_text = new_stat.inner_text()
+    assert int(new_text.strip()) == 0, (
+        f"Expected preview-stat-new to be 0, got {new_text!r}"
+    )
+
+    # Commit button must be enabled — pending rows are valid to commit.
+    expect(page.get_by_test_id("commit-btn")).to_be_enabled()
