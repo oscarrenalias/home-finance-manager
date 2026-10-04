@@ -125,13 +125,13 @@ class TestDecodeBytes:
     def test_latin1_fallback(self, caplog):
         # b'\xe9' is 'é' in latin-1 but invalid as standalone UTF-8
         data = "café".encode("latin-1")
-        with caplog.at_level(logging.WARNING, logger="domain.parser"):
+        with caplog.at_level(logging.WARNING):
             result = self._fn()(data)
         assert "caf" in result
         assert any("latin-1" in r.message for r in caplog.records)
 
     def test_clean_utf8_no_warning(self, caplog):
-        with caplog.at_level(logging.WARNING, logger="domain.parser"):
+        with caplog.at_level(logging.WARNING):
             self._fn()(b"clean utf-8")
         assert not caplog.records
 
