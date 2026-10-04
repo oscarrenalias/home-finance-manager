@@ -1,4 +1,35 @@
-"""Playwright browser tests for the Import page."""
+"""Playwright browser tests for the Import page.
+
+Covered acceptance criteria (design/home-finance-spec.md §14):
+  A01 — CSV shape parses correctly (dates, decimal commas, null balances, statuses).
+        Exercises: test_import_golden_path, test_import_bad_header,
+                   test_import_success_shows_new_count.
+  A02 — Reimporting an identical file for the same account inserts zero new executed
+        transactions and blocks the commit button.
+        Exercises: test_reimport_same_file_blocked.
+  A04 — Two equal purchases on the same date are both retained; neither is silently
+        deduplicated in the preview table.
+        Exercises: test_import_duplicate_rows_both_visible.
+  A07 — A pending-only export (all rows Pending, empty Balance) imports successfully
+        without requiring an executed-date range.
+        Exercises: test_import_pending_only_shows_pending_stat.
+
+Balance-check warning (preview integrity, not a named A0x criterion):
+  test_import_balance_mismatch_shows_warning verifies that the preview panel surfaces
+  ``balance-check-mismatch`` when consecutive row balances do not add up arithmetically,
+  before the user commits. Row 1: balance=800.00; Row 2: amount=-15.00 → expected 785.00,
+  CSV supplies 790.00.
+
+CSV uniqueness strategy — each fixture uses a distinct calendar year plus a description
+prefix that matches the test function name.  This prevents row collisions across tests
+regardless of execution order in the shared SQLite database:
+  2021 → test_import_success_shows_new_count        (executed rows, consistent balances)
+  2022 → test_reimport_same_file_blocked             (executed rows, committed twice)
+  2023 → test_import_pending_only_shows_pending_stat (Pending status, empty Balance)
+  2024 → test_import_duplicate_rows_both_visible     (identical date/amount/description pair)
+  2025 → test_import_balance_mismatch_shows_warning  (deliberate balance arithmetic gap)
+  2026 → test_import_golden_path                     (five executed rows, not reimported)
+"""
 from __future__ import annotations
 
 import textwrap

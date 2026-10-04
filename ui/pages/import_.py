@@ -278,7 +278,7 @@ def _error_banner() -> rx.Component:
             ImportState.error_message,
             color_scheme="red",
             width="100%",
-            data_testid="error-banner",
+            data_testid="error-banner",  # visible when upload fails or header validation rejects the file
         ),
         rx.fragment(),
     )
@@ -288,11 +288,11 @@ def _account_selector() -> rx.Component:
     return rx.vstack(
         rx.text("Account", weight="medium", size="2"),
         rx.select.root(
-            rx.select.trigger(placeholder="Select account", data_testid="account-select"),
+            rx.select.trigger(placeholder="Select account", data_testid="account-select"),  # dropdown trigger; tests wait until text != "Select account" before clicking
             rx.select.content(
                 rx.foreach(
                     ImportState.account_options,
-                    lambda opt: rx.select.item(opt[1], value=opt[0], data_testid=opt[0]),
+                    lambda opt: rx.select.item(opt[1], value=opt[0], data_testid=opt[0]),  # each option's testid is the account uuid (uuid5(NAMESPACE_DNS, "home-finances.<slug>"))
                 ),
             ),
             value=ImportState.selected_account_id,
@@ -329,7 +329,7 @@ def _upload_area() -> rx.Component:
             text_align="center",
             cursor="pointer",
             _hover={"border_color": "var(--accent-6)"},
-            data_testid="csv-upload",
+            data_testid="csv-upload",  # drop zone; tests use .locator('input[type="file"]') inside it to set files
         ),
         align="start",
         gap="0.75em",
@@ -407,10 +407,10 @@ def _stat_tile(label: str, value: Any, data_testid: str = "") -> rx.Component:
 def _summary_row() -> rx.Component:
     return rx.hstack(
         _stat_tile("Total", ImportState.preview_executed_count + ImportState.preview_pending_count),
-        _stat_tile("New", ImportState.preview_new_count, data_testid="preview-stat-new"),
+        _stat_tile("New", ImportState.preview_new_count, data_testid="preview-stat-new"),  # 0 when all rows are Pending (A07)
         _stat_tile("Reused", ImportState.preview_reused_count, data_testid="preview-stat-reused"),
         _stat_tile("Ambiguous", ImportState.preview_ambiguous_count, data_testid="preview-stat-ambiguous"),
-        _stat_tile("Pending", ImportState.preview_pending_count, data_testid="preview-stat-pending"),
+        _stat_tile("Pending", ImportState.preview_pending_count, data_testid="preview-stat-pending"),  # non-zero for pending-only exports (A07)
         _stat_tile("Errors", ImportState.preview_error_count),
         gap="2em",
         padding="1em",
@@ -429,7 +429,7 @@ def _balance_check_indicator() -> rx.Component:
             rx.text("Balance checks passed", size="2"),
             align="center",
             gap="0.5em",
-            data_testid="balance-check-ok",
+            data_testid="balance-check-ok",  # all consecutive balance pairs verified
         ),
         rx.cond(
             ImportState.preview_balance_status == "mismatch",
@@ -446,14 +446,14 @@ def _balance_check_indicator() -> rx.Component:
                 ),
                 align="start",
                 gap="0.25em",
-                data_testid="balance-check-mismatch",
+                data_testid="balance-check-mismatch",  # balance arithmetic inconsistency detected; asserted before commit in balance-mismatch test
             ),
             rx.hstack(
                 rx.icon("circle-help", size=16, color="var(--orange-9)"),
                 rx.text("Balance check inconclusive", size="2", color="var(--orange-9)"),
                 align="center",
                 gap="0.5em",
-                data_testid="balance-check-inconclusive",
+                data_testid="balance-check-inconclusive",  # not enough balance data to verify (e.g. Pending rows with empty Balance)
             ),
         ),
     )
@@ -519,13 +519,13 @@ def _row_table() -> rx.Component:
                         rx.table.cell(
                             _confidence_badge(row["confidence"]),
                         ),
-                        data_testid="preview-row",
+                        data_testid="preview-row",  # one per parsed CSV row; count >= 2 verifies duplicates are not collapsed (A04)
                     ),
                 ),
             ),
             variant="surface",
             width="100%",
-            data_testid="preview-table",
+            data_testid="preview-table",  # tests wait for this to be visible before asserting row or stat state
         ),
         overflow_x="auto",
         width="100%",
@@ -566,14 +566,14 @@ def _commit_button() -> rx.Component:
             "Committing…",
             disabled=True,
             color_scheme="blue",
-            data_testid="commit-btn",
+            data_testid="commit-btn",  # disabled spinner state while commit is in flight
         ),
         rx.button(
             "Commit import",
             on_click=ImportState.handle_commit,
             disabled=ImportState.commit_disabled,
             color_scheme="blue",
-            data_testid="commit-btn",
+            data_testid="commit-btn",  # disabled when already_imported (A02) or parse errors are present
         ),
     )
 
@@ -599,7 +599,7 @@ def _preview_panel() -> rx.Component:
                     ),
                     color_scheme="orange",
                     width="100%",
-                    data_testid="already-imported-banner",
+                    data_testid="already-imported-banner",  # shown when same file+account was previously committed (A02); commit-btn is disabled alongside this
                 ),
                 rx.fragment(),
             ),
@@ -675,7 +675,7 @@ def _commit_summary_panel() -> rx.Component:
                         gap="0.5em",
                     ),
                     rx.hstack(
-                        _stat_tile("New transactions", ImportState.commit_result_new_transactions, data_testid="commit-result-new-count"),
+                        _stat_tile("New transactions", ImportState.commit_result_new_transactions, data_testid="commit-result-new-count"),  # asserted to equal the CSV row count after a successful commit
                         _stat_tile("Reused", ImportState.commit_result_reused_transactions),
                         _stat_tile("Pending observations", ImportState.commit_result_pending_observations),
                         _stat_tile("Enqueued jobs", ImportState.commit_result_enqueued_jobs),
@@ -687,7 +687,7 @@ def _commit_summary_panel() -> rx.Component:
                 ),
                 color_scheme="green",
                 width="100%",
-                data_testid="success-banner",
+                data_testid="success-banner",  # green callout shown after commit completes; primary golden-path assertion
             ),
             align="start",
             gap="0.75em",
