@@ -394,22 +394,23 @@ def _completeness_checkbox() -> rx.Component:
 # ---------------------------------------------------------------------------
 
 
-def _stat_tile(label: str, value: Any) -> rx.Component:
+def _stat_tile(label: str, value: Any, data_testid: str = "") -> rx.Component:
     return rx.vstack(
         rx.text(value, weight="bold", size="5"),
         rx.text(label, size="1", color_scheme="gray"),
         align="center",
         gap="0.15em",
+        data_testid=data_testid,
     )
 
 
 def _summary_row() -> rx.Component:
     return rx.hstack(
         _stat_tile("Total", ImportState.preview_executed_count + ImportState.preview_pending_count),
-        _stat_tile("New", ImportState.preview_new_count),
-        _stat_tile("Reused", ImportState.preview_reused_count),
-        _stat_tile("Ambiguous", ImportState.preview_ambiguous_count),
-        _stat_tile("Pending", ImportState.preview_pending_count),
+        _stat_tile("New", ImportState.preview_new_count, data_testid="preview-stat-new"),
+        _stat_tile("Reused", ImportState.preview_reused_count, data_testid="preview-stat-reused"),
+        _stat_tile("Ambiguous", ImportState.preview_ambiguous_count, data_testid="preview-stat-ambiguous"),
+        _stat_tile("Pending", ImportState.preview_pending_count, data_testid="preview-stat-pending"),
         _stat_tile("Errors", ImportState.preview_error_count),
         gap="2em",
         padding="1em",
@@ -428,6 +429,7 @@ def _balance_check_indicator() -> rx.Component:
             rx.text("Balance checks passed", size="2"),
             align="center",
             gap="0.5em",
+            data_testid="balance-check-ok",
         ),
         rx.cond(
             ImportState.preview_balance_status == "mismatch",
@@ -444,12 +446,14 @@ def _balance_check_indicator() -> rx.Component:
                 ),
                 align="start",
                 gap="0.25em",
+                data_testid="balance-check-mismatch",
             ),
             rx.hstack(
                 rx.icon("circle-help", size=16, color="var(--orange-9)"),
                 rx.text("Balance check inconclusive", size="2", color="var(--orange-9)"),
                 align="center",
                 gap="0.5em",
+                data_testid="balance-check-inconclusive",
             ),
         ),
     )
@@ -515,6 +519,7 @@ def _row_table() -> rx.Component:
                         rx.table.cell(
                             _confidence_badge(row["confidence"]),
                         ),
+                        data_testid="preview-row",
                     ),
                 ),
             ),
@@ -594,6 +599,7 @@ def _preview_panel() -> rx.Component:
                     ),
                     color_scheme="orange",
                     width="100%",
+                    data_testid="already-imported-banner",
                 ),
                 rx.fragment(),
             ),
@@ -669,7 +675,7 @@ def _commit_summary_panel() -> rx.Component:
                         gap="0.5em",
                     ),
                     rx.hstack(
-                        _stat_tile("New transactions", ImportState.commit_result_new_transactions),
+                        _stat_tile("New transactions", ImportState.commit_result_new_transactions, data_testid="commit-result-new-count"),
                         _stat_tile("Reused", ImportState.commit_result_reused_transactions),
                         _stat_tile("Pending observations", ImportState.commit_result_pending_observations),
                         _stat_tile("Enqueued jobs", ImportState.commit_result_enqueued_jobs),
