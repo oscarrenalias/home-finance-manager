@@ -9,3 +9,4 @@
 .takt/agent-runs/
 .takt/beads/
 .takt/memory/
+**/.takt/memory/
