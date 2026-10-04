@@ -20,6 +20,10 @@ ALL_TABLES = CORE_TABLES | NEW_TABLES
 def _make_alembic_cfg(db_url: str) -> Config:
     cfg = Config(_PROJECT_ROOT / "alembic.ini")
     cfg.set_main_option("sqlalchemy.url", db_url)
+    # Prevent env.py from calling logging.config.fileConfig(alembic.ini), which
+    # runs with disable_existing_loggers=True and silences all non-alembic loggers
+    # (including domain.*) for the remainder of the pytest session.
+    cfg.config_file_name = None
     return cfg
 
 
@@ -53,10 +57,13 @@ def test_upgrade_head_creates_all_tables(fresh_db):
     assert ALL_TABLES == _table_names(fresh_db)
 
 
-def test_downgrade_minus_one_removes_new_tables(fresh_db):
+def test_downgrade_removes_new_tables(fresh_db):
+    # Downgrade past the seed migration (data-only) AND the schema migration that
+    # added classifications/audit_events/jobs. "-2" from head reaches the initial
+    # core-tables revision (6d9b6bbbe14a), leaving only core tables.
     cfg = _make_alembic_cfg(fresh_db)
     command.upgrade(cfg, "head")
-    command.downgrade(cfg, "-1")
+    command.downgrade(cfg, "-2")
     remaining = _table_names(fresh_db)
     assert NEW_TABLES.isdisjoint(remaining), f"New tables still present: {NEW_TABLES & remaining}"
     assert CORE_TABLES.issubset(remaining), f"Core tables missing: {CORE_TABLES - remaining}"

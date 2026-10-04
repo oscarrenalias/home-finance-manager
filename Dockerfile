@@ -1,8 +1,9 @@
 FROM python:3.11-slim
 
-# curl: container health checks; Reflex installs its own Bun/Node at runtime
+# curl: health checks; unzip: required by Reflex 0.9.x bun installer
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
+    unzip \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
