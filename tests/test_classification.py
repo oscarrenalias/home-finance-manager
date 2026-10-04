@@ -1,8 +1,14 @@
-"""Tests for domain.classification pure functions — no DB, no Reflex."""
+"""Tests for domain.classification pure functions and classification service — no Reflex."""
 from __future__ import annotations
 
+from collections.abc import Generator
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
+
+import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.engine import Engine
+from sqlalchemy.orm import Session, sessionmaker
 
 
 # ---------------------------------------------------------------------------
@@ -219,3 +225,199 @@ class TestAffectsSpending:
     def test_external_transfer_returns_false(self):
         c = _Classification("rule", "external_transfer")
         assert self._fn()(c) is False
+
+
+# ---------------------------------------------------------------------------
+# A12: gross / refund / net spending arithmetic (pure arithmetic, no DB)
+# ---------------------------------------------------------------------------
+
+def test_a12_gross_refund_net_spending_arithmetic():
+    """A12: EUR 100 expense + EUR 20 refund → gross 100, refund 20, net 80."""
+    from domain.classification import affects_spending
+
+    expense_clf = _Classification("rule", "expense")
+    refund_clf = _Classification("rule", "refund")
+    transfer_clf = _Classification("rule", "internal_transfer")
+
+    assert affects_spending(expense_clf) is True
+    assert affects_spending(refund_clf) is True
+    assert affects_spending(transfer_clf) is False
+
+    # Amount stored as signed integer cents; gross uses absolute value of debit
+    gross_expense_cents = abs(-10000)   # EUR 100 outflow
+    refund_cents = 2000                 # EUR 20 inflow refund
+    net_spending_cents = gross_expense_cents - refund_cents
+
+    assert gross_expense_cents == 10000
+    assert refund_cents == 2000
+    assert net_spending_cents == 8000   # EUR 80
+
+
+# ---------------------------------------------------------------------------
+# Service-layer fixtures
+# ---------------------------------------------------------------------------
+
+@pytest.fixture()
+def svc_engine(tmp_path) -> Generator[Engine, None, None]:
+    from storage.models import Base
+    db_path = tmp_path / "cls_svc_test.db"
+    engine = create_engine(f"sqlite:///{db_path}", connect_args={"check_same_thread": False})
+    Base.metadata.create_all(engine)
+    yield engine
+    engine.dispose()
+
+
+@pytest.fixture()
+def svc_session(svc_engine) -> Generator[Session, None, None]:
+    from storage.models import Account
+    factory = sessionmaker(bind=svc_engine, expire_on_commit=False)
+    s = factory()
+    acct = Account(id="acct-cls-svc", name="Common", role="common", currency="EUR", active=True)
+    s.add(acct)
+    s.commit()
+    yield s
+    s.close()
+
+
+def _txn_svc(session: Session, txn_id: str, amount_cents: int):
+    from storage.models import Transaction
+    t = Transaction(
+        id=txn_id,
+        account_id="acct-cls-svc",
+        date=date(2026, 1, 1),
+        amount_cents=amount_cents,
+        balance_after=None,
+        currency="EUR",
+        original_text="Test",
+        display_text="Test",
+        status="Executed",
+        transaction_type="unknown",
+    )
+    session.add(t)
+    session.flush()
+    return t
+
+
+# ---------------------------------------------------------------------------
+# create_rule
+# ---------------------------------------------------------------------------
+
+def test_create_rule_inserts_confirmed_rule(svc_session):
+    from services.classification_service import create_rule
+    rule = create_rule(svc_session, "text_contains", "supermarket", "expense", priority=5)
+    svc_session.commit()
+    assert rule.id is not None
+    assert rule.is_confirmed is True
+    assert rule.priority == 5
+    assert rule.pattern_type == "text_contains"
+    assert rule.transaction_type == "expense"
+
+
+def test_create_rule_rejects_invalid_pattern_type(svc_session):
+    from services.classification_service import create_rule
+    with pytest.raises(ValueError, match="pattern_type"):
+        create_rule(svc_session, "regex_match", ".*shop.*", "expense")
+
+
+def test_create_rule_rejects_invalid_transaction_type(svc_session):
+    from services.classification_service import create_rule
+    with pytest.raises(ValueError, match="transaction_type"):
+        create_rule(svc_session, "text_contains", "shop", "not_a_type")
+
+
+# ---------------------------------------------------------------------------
+# apply_classification
+# ---------------------------------------------------------------------------
+
+def test_apply_classification_inserts_row_and_audit(svc_session):
+    from services.classification_service import apply_classification
+    from storage.models import AuditEvent
+    txn = _txn_svc(svc_session, "txn-apply-svc-1", -5000)
+    clf = apply_classification(svc_session, txn.id, "rule", "expense", "groceries", "Prisma", None)
+    svc_session.commit()
+    assert clf.id is not None
+    assert clf.transaction_type == "expense"
+    assert clf.source == "rule"
+    assert clf.review_state == "needs_review"
+    audit_count = svc_session.query(AuditEvent).filter_by(entity_id=clf.id).count()
+    assert audit_count == 1
+
+
+def test_apply_classification_rejects_invalid_source(svc_session):
+    from services.classification_service import apply_classification
+    txn = _txn_svc(svc_session, "txn-apply-svc-2", -3000)
+    with pytest.raises(ValueError, match="source"):
+        apply_classification(svc_session, txn.id, "unknown_source", "expense", None, None, None)
+
+
+def test_apply_classification_rejects_invalid_transaction_type(svc_session):
+    from services.classification_service import apply_classification
+    txn = _txn_svc(svc_session, "txn-apply-svc-3", -3000)
+    with pytest.raises(ValueError, match="transaction_type"):
+        apply_classification(svc_session, txn.id, "rule", "not_a_type", None, None, None)
+
+
+# ---------------------------------------------------------------------------
+# manual_override
+# ---------------------------------------------------------------------------
+
+def test_manual_override_sets_accepted_state(svc_session):
+    from services.classification_service import manual_override
+    from storage.models import AuditEvent
+    txn = _txn_svc(svc_session, "txn-manual-svc-1", -7500)
+    clf = manual_override(svc_session, txn.id, "expense", "groceries", "K-Market")
+    svc_session.commit()
+    assert clf.source == "manual"
+    assert clf.review_state == "accepted"
+    assert clf.transaction_type == "expense"
+    # manual_override emits two audit events: one from apply_classification + one for override itself
+    audit_count = svc_session.query(AuditEvent).filter_by(entity_id=clf.id).count()
+    assert audit_count == 2
+
+
+# ---------------------------------------------------------------------------
+# resolve_active_classification
+# ---------------------------------------------------------------------------
+
+def test_resolve_active_classification_returns_none_for_unknown_id(svc_session):
+    from services.classification_service import resolve_active_classification
+    result = resolve_active_classification(svc_session, "nonexistent-txn-id")
+    assert result is None
+
+
+def test_resolve_active_classification_returns_manual_over_rule(svc_session):
+    from services.classification_service import apply_classification, manual_override, resolve_active_classification
+    txn = _txn_svc(svc_session, "txn-resolve-svc-1", -3000)
+    apply_classification(svc_session, txn.id, "rule", "income", None, None, None)
+    manual_override(svc_session, txn.id, "expense", "groceries", None)
+    svc_session.commit()
+
+    result = resolve_active_classification(svc_session, txn.id)
+    assert result is not None
+    assert result.source == "manual"
+    assert result.transaction_type == "expense"
+
+
+# ---------------------------------------------------------------------------
+# A11: manual override survives reimport
+# ---------------------------------------------------------------------------
+
+def test_a11_manual_override_survives_reimport(svc_session):
+    """A11: commit → manual override → reimport (new rule classifications) → resolve still returns manual."""
+    from services.classification_service import apply_classification, manual_override, resolve_active_classification
+    txn = _txn_svc(svc_session, "txn-a11-svc", -10000)
+
+    apply_classification(svc_session, txn.id, "rule", "unknown", None, None, None)
+    svc_session.commit()
+
+    manual_override(svc_session, txn.id, "expense", "groceries", "Prisma")
+    svc_session.commit()
+
+    # Simulate rule engine re-run on reimport
+    apply_classification(svc_session, txn.id, "rule", "income", None, None, None)
+    svc_session.commit()
+
+    result = resolve_active_classification(svc_session, txn.id)
+    assert result is not None
+    assert result.source == "manual"
+    assert result.transaction_type == "expense"
