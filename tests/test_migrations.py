@@ -53,10 +53,13 @@ def test_upgrade_head_creates_all_tables(fresh_db):
     assert ALL_TABLES == _table_names(fresh_db)
 
 
-def test_downgrade_minus_one_removes_new_tables(fresh_db):
+def test_downgrade_removes_new_tables(fresh_db):
+    # Downgrade past the seed migration (data-only) AND the schema migration that
+    # added classifications/audit_events/jobs. "-2" from head reaches the initial
+    # core-tables revision (6d9b6bbbe14a), leaving only core tables.
     cfg = _make_alembic_cfg(fresh_db)
     command.upgrade(cfg, "head")
-    command.downgrade(cfg, "-1")
+    command.downgrade(cfg, "-2")
     remaining = _table_names(fresh_db)
     assert NEW_TABLES.isdisjoint(remaining), f"New tables still present: {NEW_TABLES & remaining}"
     assert CORE_TABLES.issubset(remaining), f"Core tables missing: {CORE_TABLES - remaining}"
