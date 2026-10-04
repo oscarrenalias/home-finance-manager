@@ -1,0 +1,40 @@
+services:
+  migrate:
+    build: .
+    command: uv run alembic upgrade head
+    restart: "no"
+    volumes:
+      - db-data:/data
+    environment:
+      - DATABASE_URL=sqlite:////data/finance.db
+
+  app:
+    build: .
+    command: uv run reflex run --env prod
+    ports:
+      - "3000:3000"
+      - "8000:8000"
+    volumes:
+      - db-data:/data
+      - import-files:/app/imports
+    environment:
+      - DATABASE_URL=sqlite:////data/finance.db
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  worker:
+    build: .
+    command: uv run python -m jobs.worker
+    volumes:
+      - db-data:/data
+      - import-files:/app/imports
+    environment:
+      - DATABASE_URL=sqlite:////data/finance.db
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+volumes:
+  db-data:
+  import-files:
