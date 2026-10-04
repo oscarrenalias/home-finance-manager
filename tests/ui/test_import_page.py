@@ -11,6 +11,15 @@ from playwright.sync_api import Page, expect
 # (c1a2b3d4e5f6_seed_initial_accounts.py) which uses uuid5(NAMESPACE_DNS, "home-finances.common").
 _COMMON_ACCOUNT_TESTID = str(uuid.uuid5(uuid.NAMESPACE_DNS, "home-finances.common"))
 
+# 3-row CSV with 2021 dates and descriptions prefixed with the test name.
+# Balance values are internally consistent.
+_SUCCESS_COUNT_CSV = textwrap.dedent("""\
+    "Date";"Category";"Subcategory";"Text";"Amount";"Balance";"Status";"Reconciled"
+    "01.03.2021";"Groceries";"Food";"test_import_success_shows_new_count Supermarket";"-10,00";"500,00";"Executed";""
+    "02.03.2021";"Transport";"Bus";"test_import_success_shows_new_count Transit";"-5,00";"495,00";"Executed";""
+    "03.03.2021";"Shopping";"Other";"test_import_success_shows_new_count Store";"-8,00";"487,00";"Executed";""
+""")
+
 # Valid Finnish-bank-format CSV with 5 executed rows.
 _VALID_CSV = textwrap.dedent("""\
     "Date";"Category";"Subcategory";"Text";"Amount";"Balance";"Status";"Reconciled"
@@ -86,3 +95,43 @@ def test_import_bad_header(page: Page, app_server: str, tmp_path: Path) -> None:
     expect(page.get_by_test_id("error-banner")).to_be_visible(
         timeout=_UPLOAD_TIMEOUT_MS
     )
+
+
+def test_import_success_shows_new_count(
+    page: Page, app_server: str, tmp_path: Path
+) -> None:
+    """Commit a 3-row CSV and verify the success banner reports exactly 3 new transactions."""
+    csv_file = tmp_path / "success_count.csv"
+    csv_file.write_text(_SUCCESS_COUNT_CSV, encoding="utf-8")
+
+    page.goto(f"{app_server}/import")
+    page.wait_for_load_state("networkidle")
+
+    # Wait for accounts to load before interacting with the dropdown.
+    expect(page.get_by_test_id("account-select")).not_to_have_text(
+        "Select account", timeout=15_000
+    )
+
+    # Select the Common account.
+    page.get_by_test_id("account-select").click()
+    page.get_by_test_id(_COMMON_ACCOUNT_TESTID).click()
+
+    # Upload the 3-row CSV.
+    page.get_by_test_id("csv-upload").locator('input[type="file"]').set_input_files(
+        str(csv_file)
+    )
+
+    # Wait for preview table before committing.
+    expect(page.get_by_test_id("preview-table")).to_be_visible(
+        timeout=_UPLOAD_TIMEOUT_MS
+    )
+
+    page.get_by_test_id("commit-btn").click()
+
+    # Success banner must appear after commit.
+    expect(page.get_by_test_id("success-banner")).to_be_visible(
+        timeout=_COMMIT_TIMEOUT_MS
+    )
+
+    # The new-transaction count tile must report exactly 3.
+    expect(page.get_by_test_id("commit-result-new-count")).to_contain_text("3")
