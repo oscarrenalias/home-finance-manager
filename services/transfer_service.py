@@ -23,7 +23,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from services.classification_service import apply_classification
-from storage.models import AuditEvent, Transaction, TransferLink
+from storage.models import AuditEvent, Classification, Transaction, TransferLink
 
 
 def find_transfer_candidates(session: Session, transaction_id: str) -> list[Transaction]:
@@ -117,7 +117,10 @@ def undo_transfer(session: Session, link_id: str) -> None:
     """Remove a TransferLink and record audit events for both transactions.
 
     Idempotent: if the link does not exist, returns without error.
-    Does not delete Classification rows created when the link was confirmed.
+    Rejects the rule-sourced internal_transfer Classification rows created at link
+    time (sets review_state="rejected") so that resolve_active_classification no
+    longer returns them as the active classification. Manual internal_transfer
+    classifications are left untouched.
     Does not call session.commit() — the caller owns the transaction boundary.
     """
     link = session.get(TransferLink, link_id)
@@ -131,6 +134,21 @@ def undo_transfer(session: Session, link_id: str) -> None:
     session.flush()
 
     for txn_id in (transaction_a_id, transaction_b_id):
+        # Reject stale internal_transfer classifications written by confirm_transfer.
+        # Without the link, these rows would silently override pre-existing classifications
+        # in resolve_active because they were created more recently.
+        stale_clfs = (
+            session.query(Classification)
+            .filter(
+                Classification.transaction_id == txn_id,
+                Classification.transaction_type == "internal_transfer",
+                Classification.source == "rule",
+            )
+            .all()
+        )
+        for clf in stale_clfs:
+            clf.review_state = "rejected"
+
         audit = AuditEvent(
             entity_type="transaction",
             entity_id=txn_id,

@@ -399,6 +399,40 @@ def test_resolve_active_classification_returns_manual_over_rule(svc_session):
 
 
 # ---------------------------------------------------------------------------
+# AC-6: batch classification atomicity
+# ---------------------------------------------------------------------------
+
+def test_batch_classification_all_or_nothing(svc_engine):
+    """AC-6: Classifications applied in a batch are atomic — rollback leaves zero rows."""
+    from sqlalchemy.orm import sessionmaker
+    from storage.models import Classification
+    from services.classification_service import apply_classification
+
+    factory = sessionmaker(bind=svc_engine, expire_on_commit=False)
+    session = factory()
+    try:
+        txn1 = _txn_svc(session, "txn-ac6-1", -1000)
+        txn2 = _txn_svc(session, "txn-ac6-2", -2000)
+        _txn_svc(session, "txn-ac6-3", -3000)
+        session.flush()
+
+        apply_classification(session, txn1.id, "rule", "expense", None, None, None)
+        apply_classification(session, txn2.id, "rule", "expense", None, None, None)
+        # Simulate failure before third transaction is classified — roll back entire batch
+        session.rollback()
+    finally:
+        session.close()
+
+    # In a new session, verify no classifications were committed
+    verify = factory()
+    try:
+        count = verify.query(Classification).count()
+        assert count == 0
+    finally:
+        verify.close()
+
+
+# ---------------------------------------------------------------------------
 # A11: manual override survives reimport
 # ---------------------------------------------------------------------------
 

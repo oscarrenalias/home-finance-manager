@@ -135,7 +135,10 @@ def resolve_active_classification(
     """
     orm_rows = (
         session.query(Classification)
-        .filter(Classification.transaction_id == transaction_id)
+        .filter(
+            Classification.transaction_id == transaction_id,
+            Classification.review_state != "rejected",
+        )
         .all()
     )
     # Cast satisfies list invariance: ORM Classification rows structurally implement

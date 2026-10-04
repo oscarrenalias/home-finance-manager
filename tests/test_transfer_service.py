@@ -241,3 +241,61 @@ def test_undo_transfer_is_idempotent(session):
     # Undoing a nonexistent link must not raise
     undo_transfer(session, "nonexistent-link-id")
     session.commit()
+
+
+def test_undo_transfer_rejects_internal_transfer_classifications(session):
+    """After undo_transfer, rule-sourced internal_transfer Classification rows are rejected."""
+    from services.classification_service import resolve_active_classification
+
+    ref_date = date(2026, 3, 3)
+    txn_a = _txn(session, "txn-rej-a", "acct-aaa", -5000, ref_date)
+    txn_b = _txn(session, "txn-rej-b", "acct-bbb", 5000, ref_date)
+    session.flush()
+
+    link = confirm_transfer(session, txn_a.id, txn_b.id)
+    session.commit()
+
+    undo_transfer(session, link.id)
+    session.commit()
+
+    # Stale internal_transfer classifications must be rejected, not active
+    stale = session.query(Classification).filter(
+        Classification.transaction_id.in_([txn_a.id, txn_b.id]),
+        Classification.transaction_type == "internal_transfer",
+    ).all()
+    assert len(stale) == 2
+    assert all(c.review_state == "rejected" for c in stale)
+
+    # resolve_active_classification skips rejected rows, so both return None
+    assert resolve_active_classification(session, txn_a.id) is None
+    assert resolve_active_classification(session, txn_b.id) is None
+
+
+def test_a08_transfer_combined_spending_unchanged(session):
+    """A08: Linking as internal transfer yields affects_spending=False; undo restores None."""
+    from domain.classification import affects_spending
+    from services.classification_service import resolve_active_classification
+
+    ref_date = date(2026, 4, 1)
+    txn_a = _txn(session, "txn-a08-a", "acct-aaa", -22000, ref_date)
+    txn_b = _txn(session, "txn-a08-b", "acct-bbb", 22000, ref_date)
+    session.flush()
+
+    link = confirm_transfer(session, txn_a.id, txn_b.id)
+    session.commit()
+
+    clf_a = resolve_active_classification(session, txn_a.id)
+    clf_b = resolve_active_classification(session, txn_b.id)
+    assert clf_a is not None and clf_a.transaction_type == "internal_transfer"
+    assert clf_b is not None and clf_b.transaction_type == "internal_transfer"
+    assert affects_spending(clf_a) is False
+    assert affects_spending(clf_b) is False
+
+    undo_transfer(session, link.id)
+    session.commit()
+
+    # After undo the stale classifications are rejected; no active classification remains
+    clf_a_after = resolve_active_classification(session, txn_a.id)
+    clf_b_after = resolve_active_classification(session, txn_b.id)
+    assert clf_a_after is None
+    assert clf_b_after is None
