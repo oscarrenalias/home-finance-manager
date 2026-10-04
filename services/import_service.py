@@ -11,10 +11,11 @@ from uuid import uuid4
 from sqlalchemy.orm import Session
 
 from domain.balance_check import BalanceCheckResult, check_balances
+from domain.classification import match_rules
 from domain.matching import ExistingRecord, MatchCandidate, match_rows
 from domain.parser import parse_csv
 from storage.file_store import FileStore
-from storage.models import AuditEvent, ImportBatch, Job, SourceObservation, Transaction
+from storage.models import AuditEvent, Classification, ClassificationRule, ImportBatch, Job, SourceObservation, Transaction
 
 # Per-account locks to serialize concurrent imports (A18).
 # SQLite has no row-level locking; a threading lock is sufficient for single-process deployment.
@@ -327,6 +328,7 @@ class ImportService:
                 pending_observations = 0
                 enqueued_jobs = 0
                 ambiguous_count = 0
+                new_executed_transactions: list[Transaction] = []
 
                 for candidate in candidates:
                     row = candidate.parsed_row
@@ -426,8 +428,30 @@ class ImportService:
                         )
                         session.add(job)
 
+                        new_executed_transactions.append(txn)
                         new_transactions += 1
                         enqueued_jobs += 1
+
+                # Apply confirmed classification rules to newly inserted executed transactions.
+                # Rules are loaded once per import and applied to the current batch only.
+                if new_executed_transactions:
+                    confirmed_rules = (
+                        session.query(ClassificationRule)
+                        .filter(ClassificationRule.is_confirmed.is_(True))
+                        .order_by(ClassificationRule.priority.desc())
+                        .all()
+                    )
+                    for txn in new_executed_transactions:
+                        matched = match_rules(txn.display_text, txn.merchant, confirmed_rules)  # type: ignore[arg-type]
+                        if matched is not None:
+                            clf = Classification(
+                                transaction_id=txn.id,
+                                source="rule",
+                                transaction_type=matched.transaction_type,
+                                category_id=matched.category_id,
+                                merchant=matched.merchant,
+                            )
+                            session.add(clf)
 
                 audit = AuditEvent(
                     entity_type="import_batch",

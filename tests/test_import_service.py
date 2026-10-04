@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from services.import_service import ImportService
 from storage.file_store import FileStore
-from storage.models import Account, AuditEvent, Base, ImportBatch, Job, SourceObservation, Transaction
+from storage.models import Account, AuditEvent, Base, Classification, ClassificationRule, ImportBatch, Job, SourceObservation, Transaction
 
 HEADER = '"Date";"Category";"Subcategory";"Text";"Amount";"Balance";"Status";"Reconciled"'
 
@@ -546,3 +546,117 @@ class TestA18Concurrent:
         p2 = svc.preview(account.id, "a.csv", data, None, None, False)
         r = svc.commit(account.id, p2.idempotency_token, p2, None, None, False)
         assert r.new_transactions == 1
+
+
+# ---------------------------------------------------------------------------
+# Post-import rule application — confirmed rules classify new executed transactions
+# ---------------------------------------------------------------------------
+
+class TestPostImportRuleApplication:
+    def _seed_rule(
+        self,
+        session_factory,
+        *,
+        pattern_type: str = "text_contains",
+        pattern_value: str = "MERCHANT",
+        transaction_type: str = "expense",
+        category_id: str | None = "groceries",
+        merchant: str | None = None,
+        priority: int = 10,
+        is_confirmed: bool = True,
+    ):
+        session = session_factory()
+        try:
+            rule = ClassificationRule(
+                priority=priority,
+                pattern_type=pattern_type,
+                pattern_value=pattern_value,
+                transaction_type=transaction_type,
+                category_id=category_id,
+                merchant=merchant,
+                is_confirmed=is_confirmed,
+            )
+            session.add(rule)
+            session.commit()
+            return rule.id
+        finally:
+            session.close()
+
+    def test_confirmed_rule_creates_classification(self, svc, session_factory, account):
+        self._seed_rule(session_factory, pattern_value="MERCHANT", is_confirmed=True)
+        data = _csv(_row(text="MERCHANT", status="Executed"))
+        p = svc.preview(account.id, "a.csv", data, None, None, False)
+        svc.commit(account.id, p.idempotency_token, p, None, None, False)
+
+        session = session_factory()
+        try:
+            clfs = session.query(Classification).all()
+            assert len(clfs) == 1
+            assert clfs[0].source == "rule"
+            assert clfs[0].transaction_type == "expense"
+            assert clfs[0].category_id == "groceries"
+        finally:
+            session.close()
+
+    def test_unconfirmed_rule_not_applied(self, svc, session_factory, account):
+        self._seed_rule(session_factory, pattern_value="MERCHANT", is_confirmed=False)
+        data = _csv(_row(text="MERCHANT", status="Executed"))
+        p = svc.preview(account.id, "a.csv", data, None, None, False)
+        svc.commit(account.id, p.idempotency_token, p, None, None, False)
+
+        session = session_factory()
+        try:
+            assert session.query(Classification).count() == 0
+        finally:
+            session.close()
+
+    def test_no_rules_no_classifications(self, svc, session_factory, account):
+        data = _csv(_row(status="Executed"))
+        p = svc.preview(account.id, "a.csv", data, None, None, False)
+        svc.commit(account.id, p.idempotency_token, p, None, None, False)
+
+        session = session_factory()
+        try:
+            assert session.query(Classification).count() == 0
+        finally:
+            session.close()
+
+    def test_highest_priority_rule_wins(self, svc, session_factory, account):
+        self._seed_rule(session_factory, pattern_value="MERCHANT", transaction_type="expense", category_id="food", priority=5)
+        self._seed_rule(session_factory, pattern_value="MERCHANT", transaction_type="income", category_id="salary", priority=20)
+        data = _csv(_row(text="MERCHANT", status="Executed"))
+        p = svc.preview(account.id, "a.csv", data, None, None, False)
+        svc.commit(account.id, p.idempotency_token, p, None, None, False)
+
+        session = session_factory()
+        try:
+            clfs = session.query(Classification).all()
+            assert len(clfs) == 1
+            assert clfs[0].transaction_type == "income"
+            assert clfs[0].category_id == "salary"
+        finally:
+            session.close()
+
+    def test_pending_rows_not_classified(self, svc, session_factory, account):
+        self._seed_rule(session_factory, pattern_value="MERCHANT", is_confirmed=True)
+        data = _csv(_row(text="MERCHANT", status="Pending", balance=""))
+        p = svc.preview(account.id, "a.csv", data, None, None, False)
+        svc.commit(account.id, p.idempotency_token, p, None, None, False)
+
+        session = session_factory()
+        try:
+            assert session.query(Classification).count() == 0
+        finally:
+            session.close()
+
+    def test_rule_not_matching_text_no_classification(self, svc, session_factory, account):
+        self._seed_rule(session_factory, pattern_value="NOMATCH", is_confirmed=True)
+        data = _csv(_row(text="MERCHANT", status="Executed"))
+        p = svc.preview(account.id, "a.csv", data, None, None, False)
+        svc.commit(account.id, p.idempotency_token, p, None, None, False)
+
+        session = session_factory()
+        try:
+            assert session.query(Classification).count() == 0
+        finally:
+            session.close()
