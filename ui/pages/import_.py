@@ -77,12 +77,11 @@ class ImportState(rx.State):
     _preview: Optional[ImportPreview] = None
     _commit_result: Optional[CommitResult] = None
 
-    @rx.var
+    @rx.var(cache=False)
     def has_any_parse_errors(self) -> bool:
-        """True when either row-level or header-level parse errors are present."""
         return self.preview_error_count > 0 or len(self.preview_parse_errors) > 0
 
-    @rx.var
+    @rx.var(cache=False)
     def commit_disabled(self) -> bool:
         if self.preview_already_imported:
             return True
@@ -91,6 +90,26 @@ class ImportState(rx.State):
         if self.preview_same_file_different_account and not self.same_account_warning_ack:
             return True
         return False
+
+    @rx.event
+    def set_selected_account_id(self, value: str) -> None:
+        self.selected_account_id = value
+
+    @rx.event
+    def set_coverage_start(self, value: str) -> None:
+        self.coverage_start = value
+
+    @rx.event
+    def set_coverage_end(self, value: str) -> None:
+        self.coverage_end = value
+
+    @rx.event
+    def set_completeness(self, value: bool) -> None:
+        self.completeness = value
+
+    @rx.event
+    def set_same_account_warning_ack(self, value: bool) -> None:
+        self.same_account_warning_ack = value
 
     @rx.event
     def load_accounts(self) -> None:
@@ -151,46 +170,38 @@ class ImportState(rx.State):
             for rp in preview.row_previews
         ]
 
-    @rx.event(background=True)
-    async def handle_upload(self, files: list[rx.UploadFile]) -> None:
+    @rx.event
+    async def handle_upload(self, files: list[rx.UploadFile]):
         if not files:
             return
-
         file = files[0]
         filename = file.filename or "upload.csv"
+        self.filename = filename
+        self.error_message = ""
+        self._preview = None
+        self._commit_result = None
+        self.preview_has_data = False
+        self.preview_already_imported = False
+        self.preview_same_file_different_account = False
+        self.preview_executed_count = 0
+        self.preview_new_count = 0
+        self.preview_reused_count = 0
+        self.preview_ambiguous_count = 0
+        self.preview_pending_count = 0
+        self.preview_error_count = 0
+        self.preview_parse_errors = []
+        self.preview_balance_status = ""
+        self.preview_balance_mismatches = []
+        self.preview_rows = []
+        self.same_account_warning_ack = False
+        self.commit_result_has_data = False
+        account_id = self.selected_account_id
+        coverage_start = _parse_date(self.coverage_start)
+        coverage_end = _parse_date(self.coverage_end)
+        completeness = self.completeness
+        yield  # flush reset state to frontend
 
-        async with self:
-            self.filename = filename
-            self.error_message = ""
-            self._preview = None
-            self._commit_result = None
-            # Reset all display vars
-            self.preview_has_data = False
-            self.preview_already_imported = False
-            self.preview_same_file_different_account = False
-            self.preview_executed_count = 0
-            self.preview_new_count = 0
-            self.preview_reused_count = 0
-            self.preview_ambiguous_count = 0
-            self.preview_pending_count = 0
-            self.preview_error_count = 0
-            self.preview_parse_errors = []
-            self.preview_balance_status = ""
-            self.preview_balance_mismatches = []
-            self.preview_rows = []
-            self.same_account_warning_ack = False
-            self.commit_result_has_data = False
-            account_id = self.selected_account_id
-            coverage_start_str = self.coverage_start
-            coverage_end_str = self.coverage_end
-            completeness = self.completeness
-
-        # Read bytes outside the state lock — avoids holding the lock during I/O
         data = await file.read()
-
-        coverage_start = _parse_date(coverage_start_str)
-        coverage_end = _parse_date(coverage_end_str)
-
         svc = _make_service()
         try:
             preview = svc.preview(
@@ -201,13 +212,10 @@ class ImportState(rx.State):
                 coverage_end=coverage_end,
                 completeness=completeness,
             )
-            async with self:
-                self._preview = preview
-                self._populate_preview_vars(preview)
+            self._preview = preview
+            self._populate_preview_vars(preview)
         except Exception as exc:
-            async with self:
-                self.error_message = str(exc)
-        # `data` is a local variable — it goes out of scope here, not stored in state
+            self.error_message = str(exc)
 
     @rx.event(background=True)
     async def handle_commit(self) -> None:
@@ -306,6 +314,9 @@ def _upload_area() -> rx.Component:
             accept={"text/csv": [".csv"]},
             max_files=1,
             max_size=10 * 1024 * 1024,
+            on_drop=ImportState.handle_upload(
+                rx.upload_files(upload_id="csv_upload")
+            ),
             border="2px dashed var(--gray-6)",
             border_radius="0.5em",
             padding="2em",
@@ -313,13 +324,6 @@ def _upload_area() -> rx.Component:
             text_align="center",
             cursor="pointer",
             _hover={"border_color": "var(--accent-6)"},
-        ),
-        rx.button(
-            "Upload and preview",
-            on_click=ImportState.handle_upload(
-                rx.upload_files(upload_id="csv_upload")
-            ),
-            disabled=ImportState.selected_account_id == "",
         ),
         align="start",
         gap="0.75em",

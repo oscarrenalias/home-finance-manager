@@ -9,7 +9,7 @@ description = "Private household finance analysis application"
 requires-python = ">=3.11"
 dependencies = [
     # UI + backend framework (generates React frontend from Python)
-    "reflex>=0.6.0,<0.8",
+    "reflex>=0.9.0,<1.0",
     # Data access layer
     "sqlalchemy>=2.0.36,<3.0",
     "alembic>=1.13.0,<2.0",
