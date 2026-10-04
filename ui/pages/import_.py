@@ -212,8 +212,12 @@ class ImportState(rx.State):
                 coverage_end=coverage_end,
                 completeness=completeness,
             )
-            self._preview = preview
-            self._populate_preview_vars(preview)
+            if preview.parse_errors:
+                # Header-level errors prevent all row parsing — surface via error banner.
+                self.error_message = "; ".join(preview.parse_errors)
+            else:
+                self._preview = preview
+                self._populate_preview_vars(preview)
         except Exception as exc:
             self.error_message = str(exc)
 
@@ -274,6 +278,7 @@ def _error_banner() -> rx.Component:
             ImportState.error_message,
             color_scheme="red",
             width="100%",
+            data_testid="error-banner",
         ),
         rx.fragment(),
     )
@@ -283,11 +288,11 @@ def _account_selector() -> rx.Component:
     return rx.vstack(
         rx.text("Account", weight="medium", size="2"),
         rx.select.root(
-            rx.select.trigger(placeholder="Select account"),
+            rx.select.trigger(placeholder="Select account", data_testid="account-select"),
             rx.select.content(
                 rx.foreach(
                     ImportState.account_options,
-                    lambda opt: rx.select.item(opt[1], value=opt[0]),
+                    lambda opt: rx.select.item(opt[1], value=opt[0], data_testid=opt[0]),
                 ),
             ),
             value=ImportState.selected_account_id,
@@ -324,6 +329,7 @@ def _upload_area() -> rx.Component:
             text_align="center",
             cursor="pointer",
             _hover={"border_color": "var(--accent-6)"},
+            data_testid="csv-upload",
         ),
         align="start",
         gap="0.75em",
@@ -514,6 +520,7 @@ def _row_table() -> rx.Component:
             ),
             variant="surface",
             width="100%",
+            data_testid="preview-table",
         ),
         overflow_x="auto",
         width="100%",
@@ -554,12 +561,14 @@ def _commit_button() -> rx.Component:
             "Committing…",
             disabled=True,
             color_scheme="blue",
+            data_testid="commit-btn",
         ),
         rx.button(
             "Commit import",
             on_click=ImportState.handle_commit,
             disabled=ImportState.commit_disabled,
             color_scheme="blue",
+            data_testid="commit-btn",
         ),
     )
 
@@ -672,6 +681,7 @@ def _commit_summary_panel() -> rx.Component:
                 ),
                 color_scheme="green",
                 width="100%",
+                data_testid="success-banner",
             ),
             align="start",
             gap="0.75em",

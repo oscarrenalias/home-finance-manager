@@ -77,6 +77,8 @@ Install dev dependencies first (only needed once):
 uv sync --dev
 ```
 
+UI tests use system Google Chrome (no Playwright browser download needed). Ensure **Google Chrome** is installed on your machine before running UI tests.
+
 Run the full test suite:
 
 ```sh
