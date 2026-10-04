@@ -51,7 +51,7 @@ class FileStore:
             try:
                 with os.fdopen(fd, "wb") as f:
                     f.write(data)
-                os.rename(tmp_path, dest)
+                os.replace(tmp_path, dest)
             except Exception:
                 try:
                     os.unlink(tmp_path)
