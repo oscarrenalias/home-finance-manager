@@ -28,6 +28,6 @@ class MatchCandidate:
 
 def _normalize_text(text: str) -> str:
     """Return a matching key: lowercase, whitespace collapsed, cosmetic ')' suffix stripped."""
-    stripped = text.rstrip(")")
+    stripped = text.rstrip().rstrip(")")
     collapsed = re.sub(r"\s+", " ", stripped).strip()
     return collapsed.lower()
