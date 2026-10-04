@@ -516,7 +516,7 @@ def _classification_panel() -> rx.Component:
                         width="100%",
                     ),
                     rx.select.content(
-                        *[rx.select.item(t, value=t) for t in _ALL_TYPES]
+                        *[rx.select.item(t, value=t, data_testid=f"type-option-{t}") for t in _ALL_TYPES]
                     ),
                     on_change=ReviewState.set_selected_type,
                     value=ReviewState.selected_type,
