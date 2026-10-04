@@ -5,9 +5,11 @@ import reflex as rx
 from sqlalchemy.orm import joinedload
 
 from config.categories import CATEGORIES
+import services.classification_service as classification_service
+import services.transfer_service as transfer_service
 from services.transfer_service import find_transfer_candidates as _find_transfer_candidates
 from storage.database import _get_session_factory
-from storage.models import Account, Classification, Transaction, TransferLink
+from storage.models import Account, Classification, Transaction
 from ui.components import shell
 
 _PAGE_SIZE = 20
@@ -195,25 +197,32 @@ class ReviewState(rx.State):
         self.queue_count = max(0, self.queue_count - 1)
 
     @rx.event
-    def confirm_classification(self, txn_id: str, cls_id: str, transaction_type: str, category_id: str) -> None:
-        """Accept an existing classification or create a manual one, then remove from queue."""
+    def confirm_classification(self) -> None:
+        """Apply a manual override for the selected transaction, then remove from queue."""
+        txn_id = self.selected_transaction_id
+        if not txn_id:
+            return
+        item_map = {i["id"]: i for i in self.queue_items}
+        item = item_map.get(txn_id, {})
+        txn_type = self.selected_type or item.get("transaction_type", "unknown")
+        category_id = self.selected_category or None
+        merchant = self.selected_merchant or None
         session = _get_session_factory()()
         try:
-            if cls_id:
-                cls = session.get(Classification, cls_id)
-                if cls:
-                    cls.review_state = "accepted"
-            else:
-                cls = Classification(
-                    transaction_id=txn_id,
-                    source="manual",
-                    transaction_type=transaction_type or "unknown",
-                    category_id=category_id or None,
-                    review_state="accepted",
-                )
-                session.add(cls)
+            classification_service.manual_override(
+                session=session,
+                transaction_id=txn_id,
+                transaction_type=txn_type,
+                category_id=category_id,
+                merchant=merchant,
+            )
             session.commit()
             self._decrement_queue(txn_id)
+            self.selected_transaction_id = ""
+            self.selected_type = ""
+            self.selected_category = ""
+            self.selected_merchant = ""
+            self.error_message = ""
         except Exception as exc:
             self.error_message = str(exc)
             session.rollback()
@@ -221,36 +230,34 @@ class ReviewState(rx.State):
             session.close()
 
     @rx.event
-    def confirm_transfer(self, txn_id_a: str, txn_id_b: str) -> None:
-        """Confirm a matched transfer pair. Both sides are accepted; counts as one queue decrement."""
+    def confirm_transfer(self) -> None:
+        """Confirm the suggested transfer pair via transfer_service."""
+        txn_id_a = self.selected_transaction_id
+        txn_id_b = self.transfer_candidate.get("id", "")
+        if not txn_id_a or not txn_id_b:
+            return
         session = _get_session_factory()()
         try:
-            a_id, b_id = (txn_id_a, txn_id_b) if txn_id_a < txn_id_b else (txn_id_b, txn_id_a)
-            link = TransferLink(
-                transaction_a_id=a_id,
-                transaction_b_id=b_id,
-                confirmed_by="manual",
-            )
-            session.add(link)
-            for tid in (txn_id_a, txn_id_b):
-                session.add(Classification(
-                    transaction_id=tid,
-                    source="manual",
-                    transaction_type="internal_transfer",
-                    review_state="accepted",
-                ))
+            transfer_service.confirm_transfer(session, txn_id_a, txn_id_b)
             session.commit()
-            # Remove both items from the in-memory list but count as a single queue action.
             self.queue_items = [
                 item for item in self.queue_items
                 if item["id"] not in {txn_id_a, txn_id_b}
             ]
             self.queue_count = max(0, self.queue_count - 1)
+            self.selected_transaction_id = ""
+            self.transfer_candidate = {}
+            self.error_message = ""
         except Exception as exc:
             self.error_message = str(exc)
             session.rollback()
         finally:
             session.close()
+
+    @rx.event
+    def dismiss_transfer(self) -> None:
+        """Clear the transfer candidate without changing queue or classification."""
+        self.transfer_candidate = {}
 
     @rx.event
     def load_review_queue(self) -> None:
@@ -303,41 +310,6 @@ class ReviewState(rx.State):
         self.selected_merchant = val
 
     @rx.event
-    def dismiss_transfer_suggestion(self) -> None:
-        self.transfer_candidate = {}
-
-    @rx.event
-    def confirm_transfer_suggestion(self) -> None:
-        """Accept the transfer suggestion, linking the two transactions and removing both from queue."""
-        txn_id_a = self.selected_transaction_id
-        txn_id_b = self.transfer_candidate.get("id", "")
-        if not txn_id_a or not txn_id_b:
-            return
-        a_id, b_id = (txn_id_a, txn_id_b) if txn_id_a < txn_id_b else (txn_id_b, txn_id_a)
-        session = _get_session_factory()()
-        try:
-            link = TransferLink(transaction_a_id=a_id, transaction_b_id=b_id, confirmed_by="manual")
-            session.add(link)
-            for tid in (txn_id_a, txn_id_b):
-                session.add(Classification(
-                    transaction_id=tid,
-                    source="manual",
-                    transaction_type="internal_transfer",
-                    review_state="accepted",
-                ))
-            session.commit()
-            self.queue_items = [i for i in self.queue_items if i["id"] not in {txn_id_a, txn_id_b}]
-            self.queue_count = max(0, self.queue_count - 1)
-            self.transfer_candidate = {}
-            self.selected_transaction_id = ""
-            self.error_message = ""
-        except Exception as exc:
-            self.error_message = str(exc)
-            session.rollback()
-        finally:
-            session.close()
-
-    @rx.event
     def skip_classification(self) -> None:
         self.selected_transaction_id = ""
         self.selected_type = ""
@@ -345,47 +317,6 @@ class ReviewState(rx.State):
         self.selected_merchant = ""
         self.error_message = ""
         self.transfer_candidate = {}
-
-    @rx.event
-    def submit_panel_classification(self) -> None:
-        txn_id = self.selected_transaction_id
-        item_map = {i["id"]: i for i in self.queue_items}
-        item = item_map.get(txn_id, {})
-        cls_id = item.get("cls_id", "")
-        session = _get_session_factory()()
-        try:
-            if cls_id:
-                cls = session.get(Classification, cls_id)
-                if cls:
-                    cls.review_state = "accepted"
-                    if self.selected_type:
-                        cls.transaction_type = self.selected_type
-                    if self.selected_category is not None:
-                        cls.category_id = self.selected_category or None
-                    if self.selected_merchant:
-                        cls.merchant = self.selected_merchant
-            else:
-                cls = Classification(
-                    transaction_id=txn_id,
-                    source="manual",
-                    transaction_type=self.selected_type or "unknown",
-                    category_id=self.selected_category or None,
-                    merchant=self.selected_merchant or None,
-                    review_state="accepted",
-                )
-                session.add(cls)
-            session.commit()
-            self._decrement_queue(txn_id)
-            self.selected_transaction_id = ""
-            self.selected_type = ""
-            self.selected_category = ""
-            self.selected_merchant = ""
-            self.error_message = ""
-        except Exception as exc:
-            self.error_message = str(exc)
-            session.rollback()
-        finally:
-            session.close()
 
 
 def _review_row(item: dict) -> rx.Component:
@@ -535,14 +466,14 @@ def _transfer_suggestion_panel() -> rx.Component:
                 rx.button(
                     "Confirm Transfer",
                     color_scheme="blue",
-                    on_click=ReviewState.confirm_transfer_suggestion,
+                    on_click=ReviewState.confirm_transfer,
                     data_testid="confirm-transfer-btn",
                 ),
                 rx.button(
                     "Dismiss",
                     variant="soft",
                     color_scheme="gray",
-                    on_click=ReviewState.dismiss_transfer_suggestion,
+                    on_click=ReviewState.dismiss_transfer,
                     data_testid="dismiss-transfer-btn",
                 ),
                 gap="0.75em",
@@ -638,7 +569,7 @@ def _classification_panel() -> rx.Component:
                 rx.button(
                     "Confirm",
                     color_scheme="green",
-                    on_click=ReviewState.submit_panel_classification,
+                    on_click=ReviewState.confirm_classification,
                     disabled=~ReviewState.confirm_enabled,
                     data_testid="confirm-btn",
                 ),
