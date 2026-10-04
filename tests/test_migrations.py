@@ -13,7 +13,7 @@ from sqlalchemy import create_engine, event, inspect, text
 _PROJECT_ROOT = Path(__file__).parent.parent
 
 CORE_TABLES = frozenset({"accounts", "import_batches", "source_observations", "transactions"})
-NEW_TABLES = frozenset({"classifications", "audit_events", "jobs"})
+NEW_TABLES = frozenset({"classifications", "audit_events", "jobs", "classification_rules", "transfer_links"})
 ALL_TABLES = CORE_TABLES | NEW_TABLES
 
 
@@ -58,12 +58,12 @@ def test_upgrade_head_creates_all_tables(fresh_db):
 
 
 def test_downgrade_removes_new_tables(fresh_db):
-    # Downgrade past the seed migration (data-only) AND the schema migration that
-    # added classifications/audit_events/jobs. "-2" from head reaches the initial
-    # core-tables revision (6d9b6bbbe14a), leaving only core tables.
+    # Downgrade past classification_rules/transfer_links (-1), the seed data (-2),
+    # and classifications/audit_events/jobs (-3) to reach the initial core-tables
+    # revision (6d9b6bbbe14a), leaving only core tables.
     cfg = _make_alembic_cfg(fresh_db)
     command.upgrade(cfg, "head")
-    command.downgrade(cfg, "-2")
+    command.downgrade(cfg, "-3")
     remaining = _table_names(fresh_db)
     assert NEW_TABLES.isdisjoint(remaining), f"New tables still present: {NEW_TABLES & remaining}"
     assert CORE_TABLES.issubset(remaining), f"Core tables missing: {CORE_TABLES - remaining}"

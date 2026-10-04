@@ -6,7 +6,7 @@ import uuid
 from datetime import date, datetime
 from typing import Any, Optional
 
-from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Index, Integer, JSON, String, Text
+from sqlalchemy import Boolean, CheckConstraint, Date, DateTime, ForeignKey, Index, Integer, JSON, String, Text, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 
@@ -230,4 +230,70 @@ class Job(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, default=func.now(), onupdate=func.now()
+    )
+
+
+class ClassificationRule(Base):
+    """Ordered rule applied during automatic transaction classification.
+
+    Higher priority wins when multiple rules match. pattern_type drives how
+    pattern_value is matched against the transaction text or merchant field.
+    is_confirmed marks rules that have been validated by a human review.
+    """
+
+    __tablename__ = "classification_rules"
+    __table_args__ = (
+        Index("ix_classification_rules_priority", "priority"),
+        Index("ix_classification_rules_pattern_type", "pattern_type"),
+    )
+
+    PATTERN_TYPES = {"text_contains", "merchant_exact", "merchant_contains"}
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_new_uuid)
+    priority: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    pattern_type: Mapped[str] = mapped_column(String(30), nullable=False)
+    pattern_value: Mapped[str] = mapped_column(Text, nullable=False)
+    transaction_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    category_id: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    merchant: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    is_confirmed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=func.now(), onupdate=func.now()
+    )
+
+
+class TransferLink(Base):
+    """Links two transactions that represent the two sides of an internal transfer.
+
+    The pair is stored in lexicographic order (transaction_a_id < transaction_b_id)
+    so the unique constraint covers both orderings without duplication.
+    confirmed_by records whether the link was created by a matching rule or a human.
+    """
+
+    __tablename__ = "transfer_links"
+    __table_args__ = (
+        UniqueConstraint("transaction_a_id", "transaction_b_id", name="uq_transfer_links_pair"),
+        CheckConstraint("transaction_a_id < transaction_b_id", name="ck_transfer_links_order"),
+        Index("ix_transfer_links_transaction_a", "transaction_a_id"),
+        Index("ix_transfer_links_transaction_b", "transaction_b_id"),
+    )
+
+    CONFIRMED_BY_VALUES = {"manual", "rule"}
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_new_uuid)
+    transaction_a_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("transactions.id"), nullable=False
+    )
+    transaction_b_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("transactions.id"), nullable=False
+    )
+    confirmed_by: Mapped[str] = mapped_column(String(20), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=func.now())
+
+    transaction_a: Mapped[Transaction] = relationship(
+        "Transaction", foreign_keys=[transaction_a_id]
+    )
+    transaction_b: Mapped[Transaction] = relationship(
+        "Transaction", foreign_keys=[transaction_b_id]
     )
