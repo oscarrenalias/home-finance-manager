@@ -1,6 +1,6 @@
 ---
 id: spec-06-review-page-ui
-status: draft
+status: done
 ---
 
 # Review Page UI
