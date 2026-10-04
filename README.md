@@ -80,7 +80,7 @@ uv sync --dev
 Install the Playwright browser for UI tests (one-time, after `uv sync --dev`):
 
 ```sh
-playwright install chromium
+uv run playwright install chromium
 ```
 
 Run the full test suite:

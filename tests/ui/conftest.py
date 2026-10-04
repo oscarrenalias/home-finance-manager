@@ -17,13 +17,6 @@ from alembic.config import Config
 _PROJECT_ROOT = Path(__file__).parent.parent.parent
 
 
-@pytest.fixture(scope="session")
-def browser_type_launch_args(browser_type_launch_args):
-    # Use system Google Chrome instead of the Playwright-managed Chromium download.
-    # Chrome is already installed; the Playwright CDN download often fails in restricted networks.
-    return {**browser_type_launch_args, "channel": "chrome"}
-
-
 def _kill_group(proc: subprocess.Popen) -> None:
     """Send SIGTERM to the process group, wait, then SIGKILL if needed."""
     try:
