@@ -1,4 +1,105 @@
-"""Review page — pending classification decisions."""
+"""Review page — pending classification decisions.
+
+Route: /review
+On-load events: ReviewState.load_review_queue, ReviewState.load_categories
+
+Purpose
+-------
+Shows every transaction that has no *accepted* Classification record and lets
+the operator manually assign a type, category, and optional merchant name, or
+confirm/dismiss a suggested internal-transfer match between accounts.
+
+ReviewState public vars
+-----------------------
+queue_items           list[dict]  All unclassified transactions as plain dicts
+                                  (serialised by _transaction_to_dict).
+queue_count           int         Length of queue_items; decremented on each
+                                  confirm/transfer action.
+selected_transaction_id str       ID of the row currently open in the
+                                  classification panel ("" when none selected).
+selected_type         str         Type chosen in the type selector.
+selected_category     str         Category ID chosen in the category selector.
+selected_merchant     str         Merchant name typed into the merchant input.
+transfer_candidate    dict        Highest-confidence transfer counterpart for the
+                                  selected transaction (empty dict when absent).
+                                  Keys: id, date, account_name, display_amount.
+categories            list[dict]  Category options loaded from
+                                  config/categories.yaml; each has "id" and "name".
+error_message         str         Non-empty when the last DB operation failed.
+page_index            int         0-based index into paginated_items pages.
+
+Computed vars (rx.var)
+----------------------
+paginated_items       Current page slice of queue_items (_PAGE_SIZE = 20).
+total_pages           Ceiling division of queue length by _PAGE_SIZE.
+has_prev_page / has_next_page  Pagination boundary flags.
+page_info             Human-readable "Page N of M" string.
+queue_is_empty        True when queue_items is empty.
+has_transfer_candidate  True when transfer_candidate is non-empty.
+confirm_enabled       True when enough inputs are filled to submit: type is set,
+                      and category is set (unless the selected type does not use
+                      categories: internal_transfer, contribution, income,
+                      external_transfer, unknown).
+
+Key event handlers
+------------------
+load_review_queue     Query all transactions lacking an accepted Classification,
+                      populate queue_items, reset page_index to 0.
+load_categories       Read CATEGORIES singleton into self.categories.
+select_transaction    Set selected_transaction_id, clear form fields, and load
+                      the top transfer candidate via _load_transfer_candidate.
+confirm_classification  Write a manual-override Classification record via
+                      classification_service.manual_override, then remove the
+                      transaction from queue_items. See A11 note below.
+confirm_transfer      Link both sides of a transfer pair via
+                      transfer_service.confirm_transfer, remove both rows from
+                      queue_items, and decrement queue_count by 1.
+dismiss_transfer      Clear transfer_candidate without touching the queue or DB.
+skip_classification   Deselect the current transaction without saving anything.
+next_page / prev_page Increment/decrement page_index within bounds.
+set_selected_type / set_selected_category / set_selected_merchant
+                      Thin setters wired to the form controls.
+
+A11 — manual overrides survive reimport
+----------------------------------------
+confirm_classification calls classification_service.manual_override which writes
+a Classification row with source="manual" and review_state="accepted". On
+reimport, load_review_queue filters on the *absence* of an accepted
+Classification record (the accepted_subq sub-query in load_review_queue). A
+manual override is therefore never overwritten by a reimport or a model rerun,
+satisfying acceptance criterion A11.
+
+Transfer matching (transfer_service)
+-------------------------------------
+When a transaction is selected, _load_transfer_candidate calls
+transfer_service.find_transfer_candidates, which ranks counterpart transactions
+by amount mirror, date proximity, and account membership. The top candidate is
+shown in the transfer suggestion panel. Confirming it calls
+transfer_service.confirm_transfer(session, txn_id_a, txn_id_b), which marks
+both records as internal_transfer and links them; both rows then disappear from
+the review queue.
+
+data-testid inventory
+---------------------
+review-heading          Page <h1> element.
+review-queue-count      Text node showing "<N> items in queue".
+review-empty-state      Box displayed when the queue is empty.
+review-row              Container box for each transaction row in the list.
+review-expand-btn       "›" button inside each row; triggers select_transaction.
+review-prev-page        "← Prev" pagination button.
+review-next-page        "Next →" pagination button.
+type-selector           Radix Select trigger for transaction type.
+type-option-<type>      Individual items inside the type selector (e.g.
+                        type-option-expense, type-option-internal_transfer).
+category-selector       Radix Select trigger for category.
+merchant-input          Text input for optional merchant name.
+transfer-suggestion     Container box for the transfer match suggestion panel.
+confirm-transfer-btn    "Confirm Transfer" button inside the suggestion panel.
+dismiss-transfer-btn    "Dismiss" button inside the suggestion panel.
+review-error-banner     Error callout in the classification panel.
+confirm-btn             "Confirm" button to submit the classification.
+skip-btn                "Skip" button to deselect without saving.
+"""
 from __future__ import annotations
 
 import reflex as rx
