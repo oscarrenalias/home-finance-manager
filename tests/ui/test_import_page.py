@@ -11,6 +11,15 @@ from playwright.sync_api import Page, expect
 # (c1a2b3d4e5f6_seed_initial_accounts.py) which uses uuid5(NAMESPACE_DNS, "home-finances.common").
 _COMMON_ACCOUNT_TESTID = str(uuid.uuid5(uuid.NAMESPACE_DNS, "home-finances.common"))
 
+# 3-row CSV with 2022 dates and descriptions prefixed with the test name.
+# Dates and descriptions are unique to this test to avoid collision with other tests.
+_REIMPORT_CSV = textwrap.dedent("""\
+    "Date";"Category";"Subcategory";"Text";"Amount";"Balance";"Status";"Reconciled"
+    "01.06.2022";"Groceries";"Food";"test_reimport_same_file_blocked Supermarket";"-12,00";"600,00";"Executed";""
+    "02.06.2022";"Transport";"Bus";"test_reimport_same_file_blocked Transit";"-6,00";"594,00";"Executed";""
+    "03.06.2022";"Shopping";"Other";"test_reimport_same_file_blocked Store";"-9,00";"585,00";"Executed";""
+""")
+
 # 3-row CSV with 2021 dates and descriptions prefixed with the test name.
 # Balance values are internally consistent.
 _SUCCESS_COUNT_CSV = textwrap.dedent("""\
@@ -135,3 +144,59 @@ def test_import_success_shows_new_count(
 
     # The new-transaction count tile must report exactly 3.
     expect(page.get_by_test_id("commit-result-new-count")).to_contain_text("3")
+
+
+def test_reimport_same_file_blocked(
+    page: Page, app_server: str, tmp_path: Path
+) -> None:
+    """Commit a CSV once, then re-upload the identical bytes; assert reimport is blocked."""
+    csv_file = tmp_path / "reimport.csv"
+    csv_file.write_text(_REIMPORT_CSV, encoding="utf-8")
+
+    # --- First import: commit the file so it is recorded in the DB ---
+    page.goto(f"{app_server}/import")
+    page.wait_for_load_state("networkidle")
+
+    expect(page.get_by_test_id("account-select")).not_to_have_text(
+        "Select account", timeout=15_000
+    )
+
+    page.get_by_test_id("account-select").click()
+    page.get_by_test_id(_COMMON_ACCOUNT_TESTID).click()
+
+    page.get_by_test_id("csv-upload").locator('input[type="file"]').set_input_files(
+        str(csv_file)
+    )
+
+    expect(page.get_by_test_id("preview-table")).to_be_visible(
+        timeout=_UPLOAD_TIMEOUT_MS
+    )
+
+    page.get_by_test_id("commit-btn").click()
+
+    expect(page.get_by_test_id("success-banner")).to_be_visible(
+        timeout=_COMMIT_TIMEOUT_MS
+    )
+
+    # --- Second import: re-upload the identical file ---
+    page.goto(f"{app_server}/import")
+    page.wait_for_load_state("networkidle")
+
+    expect(page.get_by_test_id("account-select")).not_to_have_text(
+        "Select account", timeout=15_000
+    )
+
+    page.get_by_test_id("account-select").click()
+    page.get_by_test_id(_COMMON_ACCOUNT_TESTID).click()
+
+    page.get_by_test_id("csv-upload").locator('input[type="file"]').set_input_files(
+        str(csv_file)
+    )
+
+    # Already-imported banner must appear inside the preview panel.
+    expect(page.get_by_test_id("already-imported-banner")).to_be_visible(
+        timeout=_UPLOAD_TIMEOUT_MS
+    )
+
+    # Commit button must be disabled — reimporting the same file is blocked.
+    expect(page.get_by_test_id("commit-btn")).to_be_disabled()
