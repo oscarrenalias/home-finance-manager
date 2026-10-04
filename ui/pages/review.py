@@ -5,11 +5,30 @@ import reflex as rx
 from sqlalchemy.orm import joinedload
 
 from config.categories import CATEGORIES
+from services.transfer_service import find_transfer_candidates as _find_transfer_candidates
 from storage.database import _get_session_factory
-from storage.models import Classification, Transaction, TransferLink
+from storage.models import Account, Classification, Transaction, TransferLink
 from ui.components import shell
 
 _PAGE_SIZE = 20
+
+_ALL_TYPES: list[str] = [
+    "expense",
+    "refund",
+    "internal_transfer",
+    "contribution",
+    "income",
+    "external_transfer",
+    "unknown",
+]
+
+_TYPES_WITHOUT_CATEGORY: frozenset[str] = frozenset({
+    "internal_transfer",
+    "contribution",
+    "income",
+    "external_transfer",
+    "unknown",
+})
 
 _TYPE_COLORS: dict[str, str] = {
     "expense": "red",
@@ -78,6 +97,10 @@ class ReviewState(rx.State):
     categories: list[dict] = []
     error_message: str = ""
     page_index: int = 0
+    selected_type: str = ""
+    selected_category: str = ""
+    selected_merchant: str = ""
+    transfer_candidate: dict = {}
 
     @rx.var
     def paginated_items(self) -> list[dict]:
@@ -106,6 +129,18 @@ class ReviewState(rx.State):
     def queue_is_empty(self) -> bool:
         return len(self.queue_items) == 0
 
+    @rx.var
+    def has_transfer_candidate(self) -> bool:
+        return bool(self.transfer_candidate)
+
+    @rx.var
+    def confirm_enabled(self) -> bool:
+        if not self.selected_type:
+            return False
+        if self.selected_type in _TYPES_WITHOUT_CATEGORY:
+            return True
+        return bool(self.selected_category)
+
     @rx.event
     def next_page(self) -> None:
         if self.has_next_page:
@@ -116,9 +151,43 @@ class ReviewState(rx.State):
         if self.has_prev_page:
             self.page_index -= 1
 
+    def _load_transfer_candidate(self, txn_id: str) -> None:
+        """Fetch the highest-confidence transfer candidate for txn_id; clears state if none found."""
+        if not txn_id:
+            self.transfer_candidate = {}
+            return
+        session = _get_session_factory()()
+        try:
+            candidates = _find_transfer_candidates(session, txn_id)
+            if candidates:
+                c = candidates[0]
+                acct = session.get(Account, c.account_id)
+                account_name = acct.name if acct else c.account_id
+                amount_cents = c.amount_cents
+                sign = "-" if amount_cents < 0 else ""
+                abs_cents = abs(amount_cents)
+                display_amount = f"{sign}€{abs_cents // 100}.{abs_cents % 100:02d}"
+                self.transfer_candidate = {
+                    "id": c.id,
+                    "date": c.date.isoformat(),
+                    "account_name": account_name,
+                    "display_amount": display_amount,
+                }
+            else:
+                self.transfer_candidate = {}
+        except Exception:
+            self.transfer_candidate = {}
+        finally:
+            session.close()
+
     @rx.event
     def select_transaction(self, txn_id: str) -> None:
         self.selected_transaction_id = txn_id
+        self.selected_type = ""
+        self.selected_category = ""
+        self.selected_merchant = ""
+        self.error_message = ""
+        self._load_transfer_candidate(txn_id)
 
     def _decrement_queue(self, txn_id: str) -> None:
         """Remove txn_id from queue_items and decrement queue_count by exactly 1."""
@@ -214,11 +283,109 @@ class ReviewState(rx.State):
         self.queue_items = items
         self.queue_count = len(items)
         self.page_index = 0
+        self._load_transfer_candidate(self.selected_transaction_id)
 
     @rx.event
     def load_categories(self) -> None:
         """Populate categories from the config/categories.yaml singleton."""
         self.categories = [{"id": c.id, "name": c.name} for c in CATEGORIES]
+
+    @rx.event
+    def set_selected_type(self, val: str) -> None:
+        self.selected_type = val
+
+    @rx.event
+    def set_selected_category(self, val: str) -> None:
+        self.selected_category = val
+
+    @rx.event
+    def set_selected_merchant(self, val: str) -> None:
+        self.selected_merchant = val
+
+    @rx.event
+    def dismiss_transfer_suggestion(self) -> None:
+        self.transfer_candidate = {}
+
+    @rx.event
+    def confirm_transfer_suggestion(self) -> None:
+        """Accept the transfer suggestion, linking the two transactions and removing both from queue."""
+        txn_id_a = self.selected_transaction_id
+        txn_id_b = self.transfer_candidate.get("id", "")
+        if not txn_id_a or not txn_id_b:
+            return
+        a_id, b_id = (txn_id_a, txn_id_b) if txn_id_a < txn_id_b else (txn_id_b, txn_id_a)
+        session = _get_session_factory()()
+        try:
+            link = TransferLink(transaction_a_id=a_id, transaction_b_id=b_id, confirmed_by="manual")
+            session.add(link)
+            for tid in (txn_id_a, txn_id_b):
+                session.add(Classification(
+                    transaction_id=tid,
+                    source="manual",
+                    transaction_type="internal_transfer",
+                    review_state="accepted",
+                ))
+            session.commit()
+            self.queue_items = [i for i in self.queue_items if i["id"] not in {txn_id_a, txn_id_b}]
+            self.queue_count = max(0, self.queue_count - 1)
+            self.transfer_candidate = {}
+            self.selected_transaction_id = ""
+            self.error_message = ""
+        except Exception as exc:
+            self.error_message = str(exc)
+            session.rollback()
+        finally:
+            session.close()
+
+    @rx.event
+    def skip_classification(self) -> None:
+        self.selected_transaction_id = ""
+        self.selected_type = ""
+        self.selected_category = ""
+        self.selected_merchant = ""
+        self.error_message = ""
+        self.transfer_candidate = {}
+
+    @rx.event
+    def submit_panel_classification(self) -> None:
+        txn_id = self.selected_transaction_id
+        item_map = {i["id"]: i for i in self.queue_items}
+        item = item_map.get(txn_id, {})
+        cls_id = item.get("cls_id", "")
+        session = _get_session_factory()()
+        try:
+            if cls_id:
+                cls = session.get(Classification, cls_id)
+                if cls:
+                    cls.review_state = "accepted"
+                    if self.selected_type:
+                        cls.transaction_type = self.selected_type
+                    if self.selected_category is not None:
+                        cls.category_id = self.selected_category or None
+                    if self.selected_merchant:
+                        cls.merchant = self.selected_merchant
+            else:
+                cls = Classification(
+                    transaction_id=txn_id,
+                    source="manual",
+                    transaction_type=self.selected_type or "unknown",
+                    category_id=self.selected_category or None,
+                    merchant=self.selected_merchant or None,
+                    review_state="accepted",
+                )
+                session.add(cls)
+            session.commit()
+            self._decrement_queue(txn_id)
+            self.selected_transaction_id = ""
+            self.selected_type = ""
+            self.selected_category = ""
+            self.selected_merchant = ""
+            self.error_message = ""
+        except Exception as exc:
+            self.error_message = str(exc)
+            session.rollback()
+        finally:
+            session.close()
 
 
 def _review_row(item: dict) -> rx.Component:
@@ -347,6 +514,154 @@ def _queue_list() -> rx.Component:
     )
 
 
+def _transfer_suggestion_panel() -> rx.Component:
+    return rx.cond(
+        ReviewState.has_transfer_candidate,
+        rx.box(
+            rx.text("Suggested transfer match", weight="bold", size="3", margin_bottom="0.5em"),
+            rx.flex(
+                rx.text(ReviewState.transfer_candidate["date"], size="2", color_scheme="gray"),
+                rx.text(ReviewState.transfer_candidate["account_name"], size="2", flex="1"),
+                rx.text(
+                    ReviewState.transfer_candidate["display_amount"],
+                    size="2",
+                    font_family="monospace",
+                ),
+                gap="1em",
+                align="center",
+                margin_bottom="0.75em",
+            ),
+            rx.flex(
+                rx.button(
+                    "Confirm Transfer",
+                    color_scheme="blue",
+                    on_click=ReviewState.confirm_transfer_suggestion,
+                    data_testid="confirm-transfer-btn",
+                ),
+                rx.button(
+                    "Dismiss",
+                    variant="soft",
+                    color_scheme="gray",
+                    on_click=ReviewState.dismiss_transfer_suggestion,
+                    data_testid="dismiss-transfer-btn",
+                ),
+                gap="0.75em",
+            ),
+            data_testid="transfer-suggestion",
+            padding="1em",
+            border="1px solid var(--blue-6)",
+            border_radius="0.5em",
+            background="var(--blue-2)",
+            margin_top="1em",
+            width="100%",
+        ),
+        rx.fragment(),
+    )
+
+
+def _classification_panel() -> rx.Component:
+    return rx.cond(
+        ReviewState.selected_transaction_id != "",
+        rx.box(
+            rx.cond(
+                ReviewState.error_message != "",
+                rx.box(
+                    rx.text(ReviewState.error_message, color="red", size="2"),
+                    padding="0.75em",
+                    border="1px solid var(--red-6)",
+                    border_radius="0.5em",
+                    margin_bottom="1em",
+                    data_testid="review-error-banner",
+                ),
+                rx.fragment(),
+            ),
+            rx.text("Classify Transaction", weight="bold", size="4", margin_bottom="0.75em"),
+            rx.vstack(
+                rx.text("Type", size="2", weight="medium"),
+                rx.select.root(
+                    rx.select.trigger(
+                        placeholder="Select type",
+                        data_testid="type-selector",
+                        width="100%",
+                    ),
+                    rx.select.content(
+                        *[rx.select.item(t, value=t) for t in _ALL_TYPES]
+                    ),
+                    on_change=ReviewState.set_selected_type,
+                    value=ReviewState.selected_type,
+                    width="100%",
+                ),
+                gap="0.25em",
+                width="100%",
+                align_items="start",
+                margin_bottom="0.75em",
+            ),
+            rx.vstack(
+                rx.text("Category", size="2", weight="medium"),
+                rx.select.root(
+                    rx.select.trigger(
+                        placeholder="Select category",
+                        data_testid="category-selector",
+                        width="100%",
+                    ),
+                    rx.select.content(
+                        rx.foreach(
+                            ReviewState.categories,
+                            lambda c: rx.select.item(c["name"], value=c["id"]),
+                        )
+                    ),
+                    on_change=ReviewState.set_selected_category,
+                    value=ReviewState.selected_category,
+                    width="100%",
+                ),
+                gap="0.25em",
+                width="100%",
+                align_items="start",
+                margin_bottom="0.75em",
+            ),
+            rx.vstack(
+                rx.text("Merchant", size="2", weight="medium"),
+                rx.input(
+                    placeholder="Merchant name (optional)",
+                    value=ReviewState.selected_merchant,
+                    on_change=ReviewState.set_selected_merchant,
+                    data_testid="merchant-input",
+                    width="100%",
+                ),
+                gap="0.25em",
+                width="100%",
+                align_items="start",
+                margin_bottom="1em",
+            ),
+            _transfer_suggestion_panel(),
+            rx.flex(
+                rx.button(
+                    "Confirm",
+                    color_scheme="green",
+                    on_click=ReviewState.submit_panel_classification,
+                    disabled=~ReviewState.confirm_enabled,
+                    data_testid="confirm-btn",
+                ),
+                rx.button(
+                    "Skip",
+                    variant="soft",
+                    color_scheme="gray",
+                    on_click=ReviewState.skip_classification,
+                    data_testid="skip-btn",
+                ),
+                gap="0.75em",
+            ),
+            padding="1.25em",
+            border="1px solid var(--accent-6)",
+            border_radius="0.5em",
+            background="var(--accent-2)",
+            width="100%",
+            margin_top="1.5em",
+        ),
+        rx.fragment(),
+    )
+
+
 @rx.page(
     route="/review",
     title="Review | Home Finance",
@@ -356,4 +671,5 @@ def review() -> rx.Component:
     return shell(
         rx.heading("Review", size="7", margin_bottom="1em", data_testid="review-heading"),
         _queue_list(),
+        _classification_panel(),
     )
