@@ -1,12 +1,8 @@
 """Balance check data structures and logic for import validation."""
 
-from __future__ import annotations
-
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
 
-if TYPE_CHECKING:
-    from domain.parser import ParsedRow
+from domain.parser import ParsedRow
 
 
 @dataclass
@@ -31,8 +27,6 @@ def check_balances(rows: list[ParsedRow]) -> BalanceCheckResult:
     Same-day pairs are inconclusive — appended to inconclusive_reasons, not
     counted as mismatches. Pending rows are excluded entirely.
     """
-    from domain.parser import ParsedRow  # noqa: F401 — resolve forward ref at runtime
-
     usable = [
         r for r in rows
         if not r.is_pending and r.parsed_balance_cents is not None
@@ -61,6 +55,9 @@ def check_balances(rows: list[ParsedRow]) -> BalanceCheckResult:
             )
             continue
 
+        # Both are non-None — enforced by the usable filter above
+        assert a.parsed_balance_cents is not None
+        assert b.parsed_balance_cents is not None
         expected = a.parsed_balance_cents + b.parsed_amount_cents
         actual = b.parsed_balance_cents
         checked_pairs += 1
