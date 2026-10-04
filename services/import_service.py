@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 from dataclasses import dataclass, field
 from datetime import date
 from typing import Callable
@@ -13,7 +14,19 @@ from domain.balance_check import BalanceCheckResult, check_balances
 from domain.matching import ExistingRecord, MatchCandidate, match_rows
 from domain.parser import parse_csv
 from storage.file_store import FileStore
-from storage.models import ImportBatch, Transaction
+from storage.models import AuditEvent, ImportBatch, Transaction
+
+# Per-account locks to serialize concurrent imports (A18).
+# SQLite has no row-level locking; a threading lock is sufficient for single-process deployment.
+_account_locks_meta: threading.Lock = threading.Lock()
+_account_locks: dict[str, threading.Lock] = {}
+
+
+def _get_account_lock(account_id: str) -> threading.Lock:
+    with _account_locks_meta:
+        if account_id not in _account_locks:
+            _account_locks[account_id] = threading.Lock()
+        return _account_locks[account_id]
 
 
 @dataclass
@@ -28,6 +41,7 @@ class RowPreview:
 
 @dataclass
 class ImportPreview:
+    filename: str
     file_hash: str
     parser_version: str
     idempotency_token: str
@@ -170,6 +184,7 @@ class ImportService:
         ]
 
         return ImportPreview(
+            filename=filename,
             file_hash=file_hash,
             parser_version=parse_result.parser_version,
             idempotency_token=idempotency_token,
@@ -186,3 +201,116 @@ class ImportService:
             parse_errors=parse_result.header_errors,
             balance_check=balance_check,
         )
+
+    def commit(
+        self,
+        account_id: str,
+        idempotency_token: str,
+        preview: ImportPreview,
+        coverage_start: date | None,
+        coverage_end: date | None,
+        completeness: bool,
+    ) -> CommitResult:
+        """Commit a previewed import to the ledger.
+
+        Idempotent: a second call with the same idempotency_token and a committed batch
+        returns the original CommitResult immediately without touching the database (A02/A18).
+        Per-account threading lock prevents concurrent commits from the same account.
+        """
+        # Fast-path idempotency check outside the lock to avoid unnecessary contention.
+        session = self._session_factory()
+        try:
+            existing = (
+                session.query(ImportBatch)
+                .filter(
+                    ImportBatch.idempotency_token == idempotency_token,
+                    ImportBatch.state == "committed",
+                )
+                .first()
+            )
+            if existing is not None:
+                return _commit_result_from_batch(existing)
+        finally:
+            session.close()
+
+        lock = _get_account_lock(account_id)
+        with lock:
+            session = self._session_factory()
+            try:
+                # Re-check inside the lock to handle the race where two callers passed
+                # the fast-path simultaneously.
+                existing = (
+                    session.query(ImportBatch)
+                    .filter(
+                        ImportBatch.idempotency_token == idempotency_token,
+                        ImportBatch.state == "committed",
+                    )
+                    .first()
+                )
+                if existing is not None:
+                    return _commit_result_from_batch(existing)
+
+                batch = ImportBatch(
+                    account_id=account_id,
+                    filename=preview.filename,
+                    file_hash=preview.file_hash,
+                    coverage_start=coverage_start,
+                    coverage_end=coverage_end,
+                    completeness_declared=completeness,
+                    state="committed",
+                    parser_version=preview.parser_version,
+                    row_count=preview.executed_count + preview.pending_count,
+                    executed_count=preview.executed_count,
+                    pending_count=preview.pending_count,
+                    error_count=preview.error_count,
+                    idempotency_token=idempotency_token,
+                )
+                session.add(batch)
+                session.flush()  # populate batch.id before referencing it in the audit event
+
+                audit = AuditEvent(
+                    entity_type="import_batch",
+                    entity_id=batch.id,
+                    action="committed",
+                    actor="system",
+                    before_state=None,
+                    after_state={
+                        "state": "committed",
+                        "file_hash": batch.file_hash,
+                        "row_count": batch.row_count,
+                        "executed_count": batch.executed_count,
+                        "pending_count": batch.pending_count,
+                    },
+                )
+                session.add(audit)
+                session.commit()
+
+                return CommitResult(
+                    batch_id=batch.id,
+                    new_transactions=0,
+                    reused_transactions=0,
+                    pending_observations=0,
+                    enqueued_jobs=0,
+                    ambiguous_count=0,
+                )
+            except Exception:
+                session.rollback()
+                raise
+            finally:
+                session.close()
+
+
+def _commit_result_from_batch(batch: ImportBatch) -> CommitResult:
+    """Reconstruct a CommitResult from a previously committed ImportBatch (idempotency path).
+
+    Transaction/observation counts are not stored on the batch; they will be derived
+    by the observation-creation bead once that is integrated. Until then, counts default to 0.
+    """
+    return CommitResult(
+        batch_id=batch.id,
+        new_transactions=0,
+        reused_transactions=0,
+        pending_observations=0,
+        enqueued_jobs=0,
+        ambiguous_count=0,
+    )
