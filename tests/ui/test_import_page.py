@@ -263,10 +263,12 @@ def test_import_pending_only_shows_pending_stat(
     )
 
     # Pending stat must be non-zero (3 pending rows).
+    # inner_text() returns "3\n\nPending" because the testid is on the vstack that
+    # contains both the value and the label — parse only the first line.
     pending_stat = page.get_by_test_id("preview-stat-pending")
     expect(pending_stat).to_be_visible()
     pending_text = pending_stat.inner_text()
-    assert int(pending_text.strip()) > 0, (
+    assert int(pending_text.split("\n")[0].strip()) > 0, (
         f"Expected preview-stat-pending to be non-zero, got {pending_text!r}"
     )
 
@@ -274,7 +276,7 @@ def test_import_pending_only_shows_pending_stat(
     new_stat = page.get_by_test_id("preview-stat-new")
     expect(new_stat).to_be_visible()
     new_text = new_stat.inner_text()
-    assert int(new_text.strip()) == 0, (
+    assert int(new_text.split("\n")[0].strip()) == 0, (
         f"Expected preview-stat-new to be 0, got {new_text!r}"
     )
 
