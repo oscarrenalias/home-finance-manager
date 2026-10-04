@@ -2,9 +2,14 @@
 from __future__ import annotations
 
 import textwrap
+import uuid
 from pathlib import Path
 
 from playwright.sync_api import Page, expect
+
+# Deterministic testid for the Common account option, derived from the seed migration
+# (c1a2b3d4e5f6_seed_initial_accounts.py) which uses uuid5(NAMESPACE_DNS, "home-finances.common").
+_COMMON_ACCOUNT_TESTID = str(uuid.uuid5(uuid.NAMESPACE_DNS, "home-finances.common"))
 
 # Valid Finnish-bank-format CSV with 5 executed rows.
 _VALID_CSV = textwrap.dedent("""\
@@ -36,7 +41,7 @@ def test_import_golden_path(page: Page, app_server: str, tmp_path: Path) -> None
 
     # Select "Common account" from the Radix Select dropdown.
     page.get_by_test_id("account-select").click()
-    page.get_by_role("option", name="Common account").click()
+    page.get_by_test_id(_COMMON_ACCOUNT_TESTID).click()
 
     # Upload the synthetic CSV via the hidden file input inside the drop zone.
     page.get_by_test_id("csv-upload").locator('input[type="file"]').set_input_files(

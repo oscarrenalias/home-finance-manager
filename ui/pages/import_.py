@@ -292,7 +292,7 @@ def _account_selector() -> rx.Component:
             rx.select.content(
                 rx.foreach(
                     ImportState.account_options,
-                    lambda opt: rx.select.item(opt[1], value=opt[0]),
+                    lambda opt: rx.select.item(opt[1], value=opt[0], data_testid=opt[0]),
                 ),
             ),
             value=ImportState.selected_account_id,

@@ -16,6 +16,13 @@ from alembic.config import Config
 _PROJECT_ROOT = Path(__file__).parent.parent.parent
 
 
+@pytest.fixture(scope="session")
+def browser_type_launch_args(browser_type_launch_args):
+    # Use system Google Chrome instead of the Playwright-managed Chromium download.
+    # Chrome is already installed; the Playwright CDN download often fails in restricted networks.
+    return {**browser_type_launch_args, "channel": "chrome"}
+
+
 def _free_port() -> int:
     """Ask the OS for a free port via bind-to-0 (best-effort; TOCTOU window before Reflex binds)."""
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
@@ -35,6 +42,7 @@ def app_server(tmp_path_factory):
 
     alembic_cfg = Config(_PROJECT_ROOT / "alembic.ini")
     alembic_cfg.set_main_option("sqlalchemy.url", db_url)
+    alembic_cfg.config_file_name = None  # prevent fileConfig from disabling non-alembic loggers
     command.upgrade(alembic_cfg, "head")
 
     env = {**os.environ, "DATABASE_URL": db_url, "IMPORT_FILES_DIR": str(imports_dir)}
