@@ -33,6 +33,13 @@ def _kill_group(proc: subprocess.Popen) -> None:
         proc.wait()
 
 
+@pytest.fixture(scope="session")
+def browser_type_launch_args(browser_type_launch_args):
+    # Use system Google Chrome (already installed) instead of the Playwright-managed
+    # Chromium binary, which requires a CDN download that fails in restricted networks.
+    return {**browser_type_launch_args, "channel": "chrome"}
+
+
 def _free_port() -> int:
     """Ask the OS for a free port via bind-to-0 (best-effort; TOCTOU window before Reflex binds)."""
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:

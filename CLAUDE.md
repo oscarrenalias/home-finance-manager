@@ -181,19 +181,21 @@ For each affected page or component, provide `tests/ui/test_<page>.py` containin
 - **Forbidden**: CSS class names (`.my-class`), element tag positions (`nth-child`, `nth-of-type`), and computed XPath expressions
 - Add `data-testid` attributes to any UI elements that tests must interact with or assert against
 
-### Setup — Playwright browser binaries
+### Setup — Playwright browser
 
-Before running any UI test, install the Chromium browser binary once per machine or CI environment:
+`tests/ui/conftest.py` launches Google Chrome via `channel="chrome"` rather than the Playwright-managed Chromium binary. This avoids CDN downloads that can fail in restricted networks. **Google Chrome must be installed on the machine running the tests** (macOS: `/Applications/Google Chrome.app`).
+
+No `playwright install` step is needed for local dev. For Docker/CI environments where Chrome is not pre-installed, add it to the image:
+
+```dockerfile
+RUN apt-get install -y google-chrome-stable
+```
+
+If you prefer the Playwright-managed Chromium binary instead, remove the `browser_type_launch_args` fixture override in `tests/ui/conftest.py` and run:
 
 ```bash
 uv run playwright install chromium
 ```
-
-This downloads the browser from the Playwright CDN. In restricted network environments (corporate proxy, air-gapped CI), either:
-- Pre-download and cache the binary layer in the Docker image (add `RUN uv run playwright install chromium` after installing dev dependencies), or
-- Set `PLAYWRIGHT_BROWSERS_PATH` to a pre-cached binary directory and skip the install step.
-
-Without this step, all tests in `tests/ui/` fail at import time with a browser-not-found error.
 
 ### Test quality requirements
 
