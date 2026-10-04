@@ -1,12 +1,12 @@
-"""SQLAlchemy ORM models for Account, ImportBatch, SourceObservation, and Transaction."""
+"""SQLAlchemy ORM models for Account, ImportBatch, SourceObservation, Transaction, Classification, AuditEvent, and Job."""
 
 from __future__ import annotations
 
 import uuid
 from datetime import date, datetime
-from typing import Optional
+from typing import Any, Optional
 
-from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Index, Integer, String, Text
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Index, Integer, JSON, String, Text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 
@@ -94,6 +94,9 @@ class Transaction(Base):
     source_observations: Mapped[list[SourceObservation]] = relationship(
         "SourceObservation", back_populates="transaction"
     )
+    classifications: Mapped[list[Classification]] = relationship(
+        "Classification", back_populates="transaction", order_by="Classification.created_at"
+    )
 
 
 class SourceObservation(Base):
@@ -129,4 +132,102 @@ class SourceObservation(Base):
     batch: Mapped[ImportBatch] = relationship("ImportBatch", back_populates="source_observations")
     transaction: Mapped[Optional[Transaction]] = relationship(
         "Transaction", back_populates="source_observations"
+    )
+
+
+class Classification(Base):
+    """Stores one classification decision for a transaction.
+
+    Multiple records per transaction are allowed; the active one is determined by
+    Classification precedence rules (manual > rule > llm) and created_at ordering.
+    """
+
+    __tablename__ = "classifications"
+    __table_args__ = (
+        Index("ix_classifications_transaction", "transaction_id"),
+        Index("ix_classifications_review_state", "review_state"),
+    )
+
+    # Valid values for constrained string fields — enforced in application code, not DB CHECK
+    SOURCES = {"manual", "rule", "llm"}
+    TRANSACTION_TYPES = {
+        "expense", "refund", "internal_transfer", "contribution",
+        "income", "external_transfer", "unknown",
+    }
+    REVIEW_STATES = {"accepted", "needs_review", "rejected"}
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_new_uuid)
+    transaction_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("transactions.id"), nullable=False
+    )
+    # Source of the classification decision: manual override, rule engine, or LLM
+    source: Mapped[str] = mapped_column(String(20), nullable=False)
+    transaction_type: Mapped[str] = mapped_column(String(30), nullable=False, default="unknown")
+    # String reference to YAML taxonomy; not a DB FK — taxonomy lives in config/categories.yaml
+    category_id: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    merchant: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    rule_version: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    model_version: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    rationale: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    review_state: Mapped[str] = mapped_column(String(20), nullable=False, default="needs_review")
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=func.now(), onupdate=func.now()
+    )
+
+    transaction: Mapped[Transaction] = relationship("Transaction", back_populates="classifications")
+
+
+class AuditEvent(Base):
+    """Immutable record of a state change to a ledger entity.
+
+    Captures before/after JSON snapshots so classification history can be replayed.
+    updated_at mirrors created_at; audit rows are never modified after insert.
+    """
+
+    __tablename__ = "audit_events"
+    __table_args__ = (
+        Index("ix_audit_events_entity", "entity_type", "entity_id"),
+        Index("ix_audit_events_created_at", "created_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_new_uuid)
+    entity_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    entity_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    action: Mapped[str] = mapped_column(String(50), nullable=False)
+    # Actor that caused the change: manual/rule/llm/system
+    actor: Mapped[str] = mapped_column(String(50), nullable=False)
+    before_state: Mapped[Optional[Any]] = mapped_column(JSON, nullable=True)
+    after_state: Mapped[Optional[Any]] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=func.now(), onupdate=func.now()
+    )
+
+
+class Job(Base):
+    """Durable background job record for classification and other async work.
+
+    The worker claims jobs transactionally via lease_expires_at to survive restarts.
+    inputs stores arbitrary JSON so the worker can reconstruct execution context.
+    """
+
+    __tablename__ = "jobs"
+    __table_args__ = (
+        Index("ix_jobs_state_kind", "state", "kind"),
+        Index("ix_jobs_lease_expires_at", "lease_expires_at"),
+    )
+
+    STATES = {"pending", "in_progress", "done", "failed"}
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_new_uuid)
+    kind: Mapped[str] = mapped_column(String(100), nullable=False)
+    state: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
+    retry_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    inputs: Mapped[Optional[Any]] = mapped_column(JSON, nullable=True)
+    error_summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    lease_expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=func.now(), onupdate=func.now()
     )
