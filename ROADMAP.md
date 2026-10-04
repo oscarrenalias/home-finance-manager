@@ -8,7 +8,7 @@
 | Categories | YAML config file (`config/categories.yaml`); restart to retune; not stored in DB |
 | LLM stack | LangChain + LiteLLM (OpenAI-compatible endpoints) |
 | LiteLLM | docker-compose sidecar |
-| Deployment | docker-compose: app container, worker container, LiteLLM sidecar |
+| Deployment | docker-compose: migrate init container, app container, worker container, LiteLLM sidecar |
 | Microservices | Not planned for release 1 |
 
 ---
@@ -20,7 +20,7 @@ Goal: a working end-to-end slice that validates the full stack (Reflex, import p
 ### Infrastructure & scaffold
 - [ ] Reflex project structure (`ui/`, `domain/`, `services/`, `storage/`, `llm/`, `jobs/`, `tests/`)
 - [ ] SQLAlchemy models + Alembic migrations (Account, ImportBatch, SourceObservation, Transaction, Classification, TransferLink, Job, AuditEvent)
-- [ ] docker-compose: Reflex app, background worker, LiteLLM sidecar
+- [ ] docker-compose: migrate init container (runs `alembic upgrade head`), Reflex app, background worker, LiteLLM sidecar
 - [ ] `config/categories.yaml` — initial taxonomy with model guidance and examples
 - [ ] Synthetic fixture data for tests (never use `sample-data/` in committed tests)
 
