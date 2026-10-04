@@ -39,6 +39,13 @@ def test_import_golden_path(page: Page, app_server: str, tmp_path: Path) -> None
     page.goto(f"{app_server}/import")
     page.wait_for_load_state("networkidle")
 
+    # Wait for accounts to load from backend (trigger transitions away from placeholder).
+    # Without this wait, clicking the trigger may open an empty dropdown while the
+    # Reflex state update is still in flight, which causes the re-render to close it.
+    expect(page.get_by_test_id("account-select")).not_to_have_text(
+        "Select account", timeout=15_000
+    )
+
     # Select "Common account" from the Radix Select dropdown.
     page.get_by_test_id("account-select").click()
     page.get_by_test_id(_COMMON_ACCOUNT_TESTID).click()

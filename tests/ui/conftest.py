@@ -40,10 +40,20 @@ def app_server(tmp_path_factory):
     imports_dir = tmp_path_factory.mktemp("imports")
     db_url = f"sqlite:///{db_dir / 'test.db'}"
 
+    # Set DATABASE_URL in the test process so alembic env.py (which reads os.environ) targets
+    # the temp test database rather than the default production database.
+    original_db_url = os.environ.get("DATABASE_URL")
+    os.environ["DATABASE_URL"] = db_url
+
     alembic_cfg = Config(_PROJECT_ROOT / "alembic.ini")
     alembic_cfg.set_main_option("sqlalchemy.url", db_url)
     alembic_cfg.config_file_name = None  # prevent fileConfig from disabling non-alembic loggers
     command.upgrade(alembic_cfg, "head")
+
+    if original_db_url is not None:
+        os.environ["DATABASE_URL"] = original_db_url
+    else:
+        os.environ.pop("DATABASE_URL", None)
 
     env = {**os.environ, "DATABASE_URL": db_url, "IMPORT_FILES_DIR": str(imports_dir)}
 
