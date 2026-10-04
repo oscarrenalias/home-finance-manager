@@ -161,3 +161,28 @@ Key invariants from `design/home-finance-spec.md` §14:
 - Test financial invariants and import identity with synthetic data; do not use `sample-data/` in committed fixtures
 - Domain modules must be testable without importing Reflex
 - Use a mocked provider adapter for LLM-dependent tests
+
+## UI Testing
+
+### Trigger
+
+When a bead's `expected_files` contains any path under `ui/pages/` or `ui/components/`, the tester bead **must** deliver a corresponding UI test file.
+
+### Deliverable
+
+For each affected page or component, provide `tests/ui/test_<page>.py` containing:
+
+- One **golden path test** — the primary success flow through the page or component
+- At least one **error or edge case test** — invalid input, empty state, error boundary, or boundary condition
+
+### Locator requirements
+
+- Use `data-testid` attributes exclusively for element selection
+- **Forbidden**: CSS class names (`.my-class`), element tag positions (`nth-child`, `nth-of-type`), and computed XPath expressions
+- Add `data-testid` attributes to any UI elements that tests must interact with or assert against
+
+### Test quality requirements
+
+- Each test must be **independent**: it must not rely on state or side effects from other tests
+- Each test must be **idempotent**: running it multiple times against a clean state produces the same result
+- Tests must not share mutable state; use fixtures to set up and tear down any required database rows or session state

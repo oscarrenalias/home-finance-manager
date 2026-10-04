@@ -274,6 +274,7 @@ def _error_banner() -> rx.Component:
             ImportState.error_message,
             color_scheme="red",
             width="100%",
+            data_testid="error-banner",
         ),
         rx.fragment(),
     )
