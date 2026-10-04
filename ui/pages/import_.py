@@ -294,6 +294,7 @@ def _account_selector() -> rx.Component:
             value=ImportState.selected_account_id,
             on_change=ImportState.set_selected_account_id,
             width="300px",
+            data_testid="account-select",
         ),
         align="start",
         gap="0.5em",
