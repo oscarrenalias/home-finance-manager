@@ -1,0 +1,146 @@
+categories:
+  - id: groceries
+    name: "Groceries"
+    guidance: "Supermarkets, convenience stores, and food shops for household consumption. Includes online grocery orders."
+    examples:
+      - "S-market"
+      - "K-market"
+      - "Lidl"
+      - "Prisma"
+
+  - id: restaurants_cafes
+    name: "Restaurants & cafes"
+    guidance: "Eating out, fast food, takeaway, coffee shops, and cafes. Does not include grocery purchases."
+    examples:
+      - "McDonald's"
+      - "Hesburger"
+      - "Starbucks"
+      - "Subway"
+
+  - id: children_activities
+    name: "Children / Activities"
+    guidance: "Sports clubs, hobby fees, activity payments, and school-related expenses for children."
+    examples:
+      - "Joensuun Kataja"
+      - "Joensuun Urheilukoulu"
+      - "Itä-Suomen Liikunta"
+      - "Jalkapalloseura"
+
+  - id: children_clothing
+    name: "Children / Clothing"
+    guidance: "Clothing and footwear purchased specifically for children. Separate budget line from adult clothing."
+    examples:
+      - "H&M Kids"
+      - "Lindex Kids"
+      - "Reima"
+      - "Polarn O. Pyret"
+
+  - id: clothing
+    name: "Clothing"
+    guidance: "Adult clothing, footwear, and accessories. Does not include children's clothing."
+    examples:
+      - "H&M"
+      - "Zara"
+      - "Lindex"
+      - "Stadium"
+
+  - id: health_wellness
+    name: "Health & wellness"
+    guidance: "Pharmacies, doctor visits, dental care, beauty services, hairdressing, and gym memberships."
+    examples:
+      - "Apteekki"
+      - "Terveystalo"
+      - "Mehiläinen"
+      - "Parturi-kampaamo"
+
+  - id: housing_maintenance
+    name: "Housing / Maintenance"
+    guidance: "Monthly housing company charges (vastike), rent, and property maintenance fees."
+    examples:
+      - "Asunto-osakeyhtiö"
+      - "Kiinteistö Oy"
+      - "Isännöitsijä"
+      - "Vuokra"
+
+  - id: electricity_energy
+    name: "Electricity / Energy"
+    guidance: "Electricity consumption charges billed by the energy supplier. Distinct from network/distribution fees."
+    parent: utilities
+    examples:
+      - "Pohjois-Karjalan Sähkö Oy"
+      - "Helen Oy"
+      - "Vattenfall"
+      - "Fortum"
+
+  - id: electricity_network
+    name: "Electricity / Network"
+    guidance: "Electricity grid distribution and network fees billed by the distribution system operator."
+    parent: utilities
+    examples:
+      - "Caruna"
+      - "Elenia"
+      - "PKS Sähkönsiirto"
+      - "Savon Voima Verkko"
+
+  - id: insurance
+    name: "Insurance"
+    guidance: "Home, car, life, pet, and travel insurance premiums."
+    examples:
+      - "If Vakuutus"
+      - "LähiTapiola"
+      - "OP Vakuutus"
+      - "Fennia"
+
+  - id: transport
+    name: "Transport"
+    guidance: "Fuel, parking, car maintenance, public transport tickets, and car equipment."
+    examples:
+      - "ABC-asema"
+      - "Neste"
+      - "HSL"
+      - "Autopiste"
+
+  - id: leisure_entertainment
+    name: "Leisure & entertainment"
+    guidance: "Events, cinema, concerts, holidays, hobby equipment, and recreational activities."
+    examples:
+      - "Finnkino"
+      - "Ticketmaster"
+      - "Booking.com"
+      - "Intersport"
+
+  - id: household_purchases
+    name: "Household purchases"
+    guidance: "Hardware, home goods, tools, and general household items. Does not include groceries."
+    examples:
+      - "Clas Ohlson"
+      - "Tokmanni"
+      - "IKEA"
+      - "Bauhaus"
+
+  - id: subscriptions
+    name: "Subscriptions"
+    guidance: "Recurring digital services, streaming platforms, software licenses, and online memberships."
+    examples:
+      - "Netflix"
+      - "Spotify"
+      - "HBO Max"
+      - "Microsoft 365"
+
+  - id: fees_charges
+    name: "Fees & charges"
+    guidance: "Bank fees, ATM fees, service charges, and administrative fees from financial institutions."
+    examples:
+      - "Nordea palvelumaksu"
+      - "OP kuukausimaksu"
+      - "S-Pankki"
+      - "Pankkimaksu"
+
+  - id: other_review
+    name: "Other / Review"
+    guidance: "Transactions the model flagged as uncertain or that do not fit any other category. Requires manual review."
+    examples:
+      - "Tuntematon"
+      - "Muu maksu"
+      - "Sekalainen"
+      - "Tarkistettava"

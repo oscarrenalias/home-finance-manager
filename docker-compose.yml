@@ -1,0 +1,48 @@
+services:
+  app:
+    build: .
+    command: uv run reflex run --env prod
+    ports:
+      - "3000:3000"
+      - "8000:8000"
+    volumes:
+      - db_data:/data/db
+      - import_files:/data/imports
+    env_file:
+      - .env
+    depends_on:
+      - litellm
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  worker:
+    build: .
+    command: uv run python -m jobs.worker
+    volumes:
+      - db_data:/data/db
+      - import_files:/data/imports
+    env_file:
+      - .env
+    depends_on:
+      - litellm
+    restart: unless-stopped
+
+  litellm:
+    image: ghcr.io/berriai/litellm:main-stable
+    command: ["--config", "/app/config.yaml", "--port", "4000"]
+    ports:
+      - "4000:4000"
+    volumes:
+      - ./litellm_config.yaml:/app/config.yaml:ro
+    env_file:
+      - .env
+    restart: unless-stopped
+
+volumes:
+  db_data:
+  import_files:
