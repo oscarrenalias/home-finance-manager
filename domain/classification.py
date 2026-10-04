@@ -1,4 +1,20 @@
-"""Pure classification functions — no database access, no Reflex or SQLAlchemy imports."""
+"""Pure classification functions — no database access, no Reflex or SQLAlchemy imports.
+
+Public API:
+- match_rules: find the highest-priority confirmed rule matching a transaction's text/merchant
+- resolve_active: collapse a list of Classification rows to a single effective result
+- affects_spending: gate whether a classification contributes to spending reports
+
+Contract:
+- No side effects. All functions are pure; callers own all I/O and session handling.
+- Structural typing via Protocol lets callers pass ORM rows without importing ORM here.
+
+Key invariants:
+- Precedence: manual > rule > llm. Within a tier, the later created_at wins.
+- A confirmed TransferLink overrides all stored classifications — resolve_active returns
+  an internal_transfer result regardless of what Classification rows exist.
+- Only "expense" and "refund" types count toward spending; all other types are excluded.
+"""
 
 from __future__ import annotations
 

@@ -1,7 +1,12 @@
 """Service-layer functions for classifying transactions.
 
 Public API: apply_classification, manual_override, resolve_active_classification.
-Internal (not part of the public service contract): create_rule.
+Internal (admin/seed only — not part of the public service contract): create_rule.
+
+Every write function records a paired AuditEvent and leaves the caller responsible
+for session.commit(). resolve_active_classification delegates precedence resolution
+to domain.classification.resolve_active and may return a synthetic
+_TransferClassification (not an ORM row) when a TransferLink exists.
 """
 
 from __future__ import annotations

@@ -1,6 +1,18 @@
 """Service-layer functions for linking and unlinking internal transfer pairs.
 
 Public API: find_transfer_candidates, confirm_transfer, undo_transfer.
+
+Transfer linking semantics:
+- A valid transfer pair has opposite amount_cents, belongs to different accounts,
+  and falls within a ±3 calendar-day window. Neither side may already be linked.
+- confirm_transfer creates a TransferLink and writes an internal_transfer
+  Classification (source=rule) for both transactions. TransferLink IDs are stored
+  in lexicographic order to satisfy the DB check constraint.
+- undo_transfer removes the TransferLink but does NOT delete the Classification rows
+  that were created at link time. domain.classification.resolve_active re-evaluates
+  precedence; without the link, those rows may be superseded by a later manual
+  override or simply become stale entries with no downstream effect.
+- All write functions leave session.commit() to the caller.
 """
 
 from __future__ import annotations
