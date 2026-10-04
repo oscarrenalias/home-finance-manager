@@ -28,6 +28,14 @@ Two accounts are in scope for the first release:
 
 Not planned for the first release: microservices, vector databases, autonomous agents, FastAPI as a separate service, Redis, or Celery. These are defaults, not hard prohibitions — revisit when there is a concrete reason.
 
+## Dependency constraints (do not regress these)
+
+These pins were established to resolve confirmed runtime conflicts. Do not change them without understanding the original reason:
+
+- **`reflex>=0.9.0,<1.0`** — Reflex 0.7.x contains a `pydantic_v1_patch()` shim in `reflex/utils/compat.py` that breaks `sqlmodel>=0.0.46` at import time (`cannot import name 'Discriminator' from 'pydantic.v1'`). Reflex 0.9.x removed this shim.
+- **`sqlmodel<0.0.47`** — Keep pinned until confirmed compatible with the chosen Reflex version.
+- **`unzip` in Dockerfile** — Reflex 0.9.x installs bun at first run; bun's installer requires `unzip`. The `Dockerfile` apt-get layer must always include `unzip` alongside `curl`.
+
 ## Module boundaries
 
 ```
