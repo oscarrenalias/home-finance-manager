@@ -5,3 +5,4 @@
 .takt/logs/
 .takt/agent-runs/
 .takt/beads/
+.takt/memory/
