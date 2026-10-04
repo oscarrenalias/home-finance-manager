@@ -20,6 +20,10 @@ ALL_TABLES = CORE_TABLES | NEW_TABLES
 def _make_alembic_cfg(db_url: str) -> Config:
     cfg = Config(_PROJECT_ROOT / "alembic.ini")
     cfg.set_main_option("sqlalchemy.url", db_url)
+    # Prevent env.py from calling logging.config.fileConfig(alembic.ini), which
+    # runs with disable_existing_loggers=True and silences all non-alembic loggers
+    # (including domain.*) for the remainder of the pytest session.
+    cfg.config_file_name = None
     return cfg
 
 
