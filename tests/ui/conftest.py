@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import signal
 import socket
 import subprocess
 import time
@@ -21,6 +22,22 @@ def browser_type_launch_args(browser_type_launch_args):
     # Use system Google Chrome instead of the Playwright-managed Chromium download.
     # Chrome is already installed; the Playwright CDN download often fails in restricted networks.
     return {**browser_type_launch_args, "channel": "chrome"}
+
+
+def _kill_group(proc: subprocess.Popen) -> None:
+    """Send SIGTERM to the process group, wait, then SIGKILL if needed."""
+    try:
+        os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+    except ProcessLookupError:
+        return
+    try:
+        proc.wait(timeout=10)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        proc.wait()
 
 
 def _free_port() -> int:
@@ -68,6 +85,7 @@ def app_server(tmp_path_factory):
         env=env,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
+        start_new_session=True,  # isolate into its own process group for clean teardown
     )
 
     base_url = f"http://localhost:{frontend_port}"
@@ -86,17 +104,9 @@ def app_server(tmp_path_factory):
             time.sleep(2)
 
     if not ready:
-        proc.terminate()
-        try:
-            proc.wait(timeout=10)
-        except subprocess.TimeoutExpired:
-            proc.kill()
+        _kill_group(proc)
         pytest.fail(f"Reflex did not become ready on port {frontend_port} within 90s")
 
     yield base_url
 
-    proc.terminate()
-    try:
-        proc.wait(timeout=10)
-    except subprocess.TimeoutExpired:
-        proc.kill()
+    _kill_group(proc)
