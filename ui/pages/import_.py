@@ -212,8 +212,12 @@ class ImportState(rx.State):
                 coverage_end=coverage_end,
                 completeness=completeness,
             )
-            self._preview = preview
-            self._populate_preview_vars(preview)
+            if preview.parse_errors:
+                # Header-level errors prevent all row parsing — surface via error banner.
+                self.error_message = "; ".join(preview.parse_errors)
+            else:
+                self._preview = preview
+                self._populate_preview_vars(preview)
         except Exception as exc:
             self.error_message = str(exc)
 

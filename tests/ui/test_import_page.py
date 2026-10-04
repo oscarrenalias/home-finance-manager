@@ -1,0 +1,76 @@
+"""Playwright browser tests for the Import page."""
+from __future__ import annotations
+
+import textwrap
+from pathlib import Path
+
+from playwright.sync_api import Page, expect
+
+# Valid Finnish-bank-format CSV with 5 executed rows.
+_VALID_CSV = textwrap.dedent("""\
+    "Date";"Category";"Subcategory";"Text";"Amount";"Balance";"Status";"Reconciled"
+    "01.01.2026";"Groceries";"Food";"K-Supermarket";"-25,50";"1.100,00";"Executed";""
+    "02.01.2026";"Transport";"Bus";"HSL";"-3,50";"1.096,50";"Executed";""
+    "03.01.2026";"Groceries";"Food";"Prisma";"-45,20";"1.051,30";"Executed";""
+    "04.01.2026";"Shopping";"Other";"Test Shop";"-15,00";"1.036,30";"Executed";""
+    "05.01.2026";"Utilities";"Other";"Utility Store";"-10,00";"1.026,30";"Executed";""
+""")
+
+# CSV whose header uses comma separators and wrong column names — triggers header errors.
+_BAD_HEADER_CSV = textwrap.dedent("""\
+    Date,Category,Description
+    2026-01-01,Food,K-Supermarket
+""")
+
+_UPLOAD_TIMEOUT_MS = 30_000
+_COMMIT_TIMEOUT_MS = 30_000
+
+
+def test_import_golden_path(page: Page, app_server: str, tmp_path: Path) -> None:
+    """Upload a valid CSV, confirm preview appears, commit, confirm success banner."""
+    csv_file = tmp_path / "valid.csv"
+    csv_file.write_text(_VALID_CSV, encoding="utf-8")
+
+    page.goto(f"{app_server}/import")
+    page.wait_for_load_state("networkidle")
+
+    # Select "Common account" from the Radix Select dropdown.
+    page.get_by_test_id("account-select").click()
+    page.get_by_role("option", name="Common account").click()
+
+    # Upload the synthetic CSV via the hidden file input inside the drop zone.
+    page.get_by_test_id("csv-upload").locator('input[type="file"]').set_input_files(
+        str(csv_file)
+    )
+
+    # Preview table must appear before commit is possible.
+    expect(page.get_by_test_id("preview-table")).to_be_visible(
+        timeout=_UPLOAD_TIMEOUT_MS
+    )
+
+    # Commit the import.
+    page.get_by_test_id("commit-btn").click()
+
+    # Success banner confirms the commit completed.
+    expect(page.get_by_test_id("success-banner")).to_be_visible(
+        timeout=_COMMIT_TIMEOUT_MS
+    )
+
+
+def test_import_bad_header(page: Page, app_server: str, tmp_path: Path) -> None:
+    """Upload a CSV with a malformed header; expect the error banner to appear."""
+    csv_file = tmp_path / "bad_header.csv"
+    csv_file.write_text(_BAD_HEADER_CSV, encoding="utf-8")
+
+    page.goto(f"{app_server}/import")
+    page.wait_for_load_state("networkidle")
+
+    # Account is auto-selected by the page on load (first active account).
+    # Upload the malformed CSV; header validation will fail and surface an error.
+    page.get_by_test_id("csv-upload").locator('input[type="file"]').set_input_files(
+        str(csv_file)
+    )
+
+    expect(page.get_by_test_id("error-banner")).to_be_visible(
+        timeout=_UPLOAD_TIMEOUT_MS
+    )
