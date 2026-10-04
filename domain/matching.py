@@ -20,6 +20,16 @@ class ExistingRecord:
 
 @dataclass
 class MatchCandidate:
+    """Outcome of matching one parsed row against the existing ledger pool.
+
+    Confidence tiers:
+    - exact: date + amount + text + balance all agree — safe to suppress.
+    - probable: date + amount + text agree, balance absent or mismatched.
+    - ambiguous: date + amount match more than one record, text differs.
+    - new: no matching record found (or row is pending — see match_rows).
+    existing_transaction_id is None for 'new' and 'ambiguous' rows.
+    """
+
     parsed_row: ParsedRow
     existing_transaction_id: str | None
     confidence: Literal["exact", "probable", "ambiguous", "new"]
@@ -39,9 +49,17 @@ def match_rows(
 ) -> list[MatchCandidate]:
     """Match parsed rows against existing ledger records to determine confidence levels.
 
-    One-to-one pool: each ExistingRecord is consumed at most once per call.
-    Pending rows always yield confidence='new'.
-    Bank category/subcategory are not used as matching evidence.
+    One-to-one pool depletion: each ExistingRecord is removed from the pool
+    on first match so that two identical transactions on the same day each
+    claim a distinct existing record (A04). This also prevents one parsed row
+    from suppressing multiple ledger entries.
+
+    Pending rows always yield confidence='new' regardless of ledger content.
+    Their amounts and dates may change before the transaction clears, so any
+    match against the current ledger would be speculative.
+
+    Bank category/subcategory are intentionally excluded from match evidence —
+    the bank's taxonomy is cosmetic and changes independently of transaction identity.
     """
     pool = list(existing)
     results: list[MatchCandidate] = []

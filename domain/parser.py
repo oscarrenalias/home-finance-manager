@@ -71,6 +71,13 @@ def _decode_bytes(data: bytes) -> str:
 
 @dataclass
 class ParsedRow:
+    """One row from the CSV, raw fields preserved alongside parsed values.
+
+    When parse_errors is non-empty, parsed_date is date.min and
+    parsed_amount_cents is 0 — sentinel values the consumer must not use
+    for business logic without first checking parse_errors.
+    """
+
     row_number: int
     raw_date: str
     raw_category: str

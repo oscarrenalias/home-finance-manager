@@ -23,6 +23,12 @@ _account_locks: dict[str, threading.Lock] = {}
 
 
 def _get_account_lock(account_id: str) -> threading.Lock:
+    """Return (creating if needed) the per-account commit lock.
+
+    _account_locks_meta guards the map itself; _account_locks[id] guards
+    the commit critical section for that account.  Two accounts never
+    contend on each other's lock.
+    """
     with _account_locks_meta:
         if account_id not in _account_locks:
             _account_locks[account_id] = threading.Lock()
@@ -41,6 +47,14 @@ class RowPreview:
 
 @dataclass
 class ImportPreview:
+    """Read-only snapshot returned by ImportService.preview().
+
+    idempotency_token is a UUID generated at preview time and must be passed
+    unchanged to commit().  It is not persisted until commit() succeeds; a
+    second preview() call for the same file produces a different token and a
+    different commit transaction.
+    """
+
     filename: str
     file_hash: str
     parser_version: str
@@ -213,9 +227,20 @@ class ImportService:
     ) -> CommitResult:
         """Commit a previewed import to the ledger.
 
-        Idempotent: a second call with the same idempotency_token and a committed batch
-        returns the original CommitResult immediately without touching the database (A02/A18).
-        Per-account threading lock prevents concurrent commits from the same account.
+        Idempotency (A02/A18): if a committed ImportBatch with the same
+        idempotency_token already exists, the original result is returned
+        immediately without writing anything.  This check runs once before the
+        lock (fast path to avoid contention) and once inside the lock (to handle
+        the race where two callers passed the fast path simultaneously).
+
+        Lock scope: the per-account threading lock covers the ledger read,
+        all row inserts, and session.commit().  Nothing outside this window
+        assumes exclusive access.  Two different accounts never contend because
+        each account has its own lock (see _get_account_lock).
+
+        Re-matching: match_rows is called again inside the lock against the
+        current ledger state, not the state captured at preview() time, because
+        another commit may have landed in between.
         """
         # Fast-path idempotency check outside the lock to avoid unnecessary contention.
         session = self._session_factory()
