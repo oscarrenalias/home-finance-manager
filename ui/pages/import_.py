@@ -78,10 +78,15 @@ class ImportState(rx.State):
     _commit_result: Optional[CommitResult] = None
 
     @rx.var
+    def has_any_parse_errors(self) -> bool:
+        """True when either row-level or header-level parse errors are present."""
+        return self.preview_error_count > 0 or len(self.preview_parse_errors) > 0
+
+    @rx.var
     def commit_disabled(self) -> bool:
         if self.preview_already_imported:
             return True
-        if self.preview_error_count > 0:
+        if self.has_any_parse_errors:
             return True
         if self.preview_same_file_different_account and not self.same_account_warning_ack:
             return True
@@ -513,7 +518,7 @@ def _row_table() -> rx.Component:
 
 def _parse_errors_list() -> rx.Component:
     return rx.cond(
-        ImportState.preview_error_count > 0,
+        ImportState.has_any_parse_errors,
         rx.vstack(
             rx.callout(
                 rx.vstack(

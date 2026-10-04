@@ -330,6 +330,9 @@ class ImportService:
 
                 for candidate in candidates:
                     row = candidate.parsed_row
+                    if row.parse_errors:
+                        # Row has sentinel values (date.min / amount 0) — skip entirely
+                        continue
                     raw_balance = row.raw_balance if row.raw_balance else None
 
                     if row.is_pending:
