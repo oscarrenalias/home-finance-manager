@@ -45,6 +45,14 @@ _BAD_HEADER_CSV = textwrap.dedent("""\
     2026-01-01,Food,K-Supermarket
 """)
 
+# 2-row CSV with 2024 dates where both rows share identical date, amount, and description.
+# Unique year (2024) and test-name prefix prevent collision with other tests.
+_DUPLICATE_ROWS_CSV = textwrap.dedent("""\
+    "Date";"Category";"Subcategory";"Text";"Amount";"Balance";"Status";"Reconciled"
+    "15.04.2024";"Groceries";"Food";"test_import_duplicate_rows_both_visible Supermarket";"-33,00";"700,00";"Executed";""
+    "15.04.2024";"Groceries";"Food";"test_import_duplicate_rows_both_visible Supermarket";"-33,00";"667,00";"Executed";""
+""")
+
 # 3-row CSV with 2023 dates, all rows Pending with empty Balance.
 # Dates and descriptions are unique to this test to avoid collision with other tests.
 _PENDING_ONLY_CSV = textwrap.dedent("""\
@@ -262,3 +270,43 @@ def test_import_pending_only_shows_pending_stat(
 
     # Commit button must be enabled — pending rows are valid to commit.
     expect(page.get_by_test_id("commit-btn")).to_be_enabled()
+
+
+def test_import_duplicate_rows_both_visible(
+    page: Page, app_server: str, tmp_path: Path
+) -> None:
+    """Upload a CSV with two rows sharing the same date, amount, and description.
+
+    Asserts that the preview table renders at least 2 rows — confirming neither
+    duplicate was collapsed or silently deduplicated in the UI (acceptance criterion A04).
+    """
+    csv_file = tmp_path / "duplicate_rows.csv"
+    csv_file.write_text(_DUPLICATE_ROWS_CSV, encoding="utf-8")
+
+    page.goto(f"{app_server}/import")
+    page.wait_for_load_state("networkidle")
+
+    # Wait for accounts to load before interacting with the dropdown.
+    expect(page.get_by_test_id("account-select")).not_to_have_text(
+        "Select account", timeout=15_000
+    )
+
+    # Select the Common account.
+    page.get_by_test_id("account-select").click()
+    page.get_by_test_id(_COMMON_ACCOUNT_TESTID).click()
+
+    # Upload the duplicate-rows CSV.
+    page.get_by_test_id("csv-upload").locator('input[type="file"]').set_input_files(
+        str(csv_file)
+    )
+
+    # Preview table must appear before row-count assertion.
+    expect(page.get_by_test_id("preview-table")).to_be_visible(
+        timeout=_UPLOAD_TIMEOUT_MS
+    )
+
+    # Both duplicate rows must be visible — neither should be collapsed.
+    row_count = page.get_by_test_id("preview-row").count()
+    assert row_count >= 2, (
+        f"Expected at least 2 preview rows for duplicate CSV, got {row_count}"
+    )
