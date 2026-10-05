@@ -286,10 +286,12 @@ class ReviewState(rx.State):
     @rx.event
     def select_transaction(self, txn_id: str) -> None:
         self.selected_transaction_id = txn_id
-        self.selected_type = ""
-        self.selected_category = ""
-        self.selected_merchant = ""
         self.error_message = ""
+        # Pre-populate from the LLM suggestion already stored in queue_items.
+        item = next((i for i in self.queue_items if i["id"] == txn_id), {})
+        self.selected_type = item.get("transaction_type", "") if item.get("transaction_type", "unknown") != "unknown" else ""
+        self.selected_category = item.get("category_id", "")
+        self.selected_merchant = item.get("merchant", "")
         self._load_transfer_candidate(txn_id)
 
     def _decrement_queue(self, txn_id: str) -> None:
