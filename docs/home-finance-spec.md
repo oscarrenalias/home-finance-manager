@@ -114,7 +114,7 @@ Direct bank integration, payments, investment advice, and automatic financial ac
 
 ```csv
 "Date";"Category";"Subcategory";"Text";"Amount";"Balance";"Status";"Reconciled"
-"30.09.2026";"Food and daily purchases   ";"Grocery stores and supermarkets   ";"K-Market Kuurinniitt";"-2,55";"722,00";"Executed";"No"
+"30.09.2026";"Food and daily purchases   ";"Grocery stores and supermarkets   ";"K-Market";"-2,55";"722,00";"Executed";"No"
 "29.09.2026";"Other expenses   ";"Transfers to own accounts   ";"HOUSEHOLD MEMBER";"-150,00";"724,55";"Executed";"No"
 "02.10.2026";"   ";"   ";"Reservation";"-28,98";"";"Pending";"No"
 ```
