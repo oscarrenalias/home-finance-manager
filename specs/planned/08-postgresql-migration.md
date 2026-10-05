@@ -1,6 +1,6 @@
 ---
 id: spec-08-postgresql-migration
-status: draft
+status: planned
 ---
 
 # PostgreSQL Migration
