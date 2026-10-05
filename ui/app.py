@@ -1,4 +1,8 @@
 """Reflex application entry point."""
+from dotenv import load_dotenv
+
+load_dotenv()  # no-op when env vars are already set (e.g. in Docker)
+
 import reflex as rx
 
 # Import page modules to register their @rx.page decorators before app compiles.

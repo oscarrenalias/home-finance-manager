@@ -1,0 +1,29 @@
+# Development artifacts
+.venv/
+.takt/
+.web/
+.claude/
+.agents/
+__pycache__/
+*.pyc
+*.pyo
+
+# Local data and uploads
+data/
+sample-data/
+*.db
+*.db-shm
+*.db-wal
+
+# Editor and OS
+.DS_Store
+.idea/
+.vscode/
+
+# Test outputs
+.pytest_cache/
+htmlcov/
+.coverage
+
+# Secrets
+.env

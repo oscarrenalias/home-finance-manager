@@ -421,7 +421,9 @@ class ReviewState(rx.State):
 
 
 def _review_row(item: dict) -> rx.Component:
+    is_selected = ReviewState.selected_transaction_id == item["id"]
     return rx.box(
+        # Clickable row header — entire strip opens/closes the panel
         rx.flex(
             rx.text(
                 item["date"],
@@ -453,16 +455,19 @@ def _review_row(item: dict) -> rx.Component:
                 variant="soft",
                 size="1",
             ),
-            rx.button(
-                "›",
-                variant="ghost",
-                size="1",
-                data_testid="review-expand-btn",
-                on_click=ReviewState.select_transaction(item["id"]),
-            ),
+            rx.cond(is_selected, rx.text("▾", size="2"), rx.text("›", size="2")),
             align="center",
             gap="0.75em",
             width="100%",
+            cursor="pointer",
+            on_click=ReviewState.select_transaction(item["id"]),
+            data_testid="review-expand-btn",
+        ),
+        # Inline classification panel — only visible for the selected row
+        rx.cond(
+            is_selected,
+            _classification_panel(),
+            rx.fragment(),
         ),
         data_testid="review-row",
         padding="0.6em 1em",
@@ -703,5 +708,4 @@ def review() -> rx.Component:
     return shell(
         rx.heading("Review", size="7", margin_bottom="1em", data_testid="review-heading"),
         _queue_list(),
-        _classification_panel(),
     )
