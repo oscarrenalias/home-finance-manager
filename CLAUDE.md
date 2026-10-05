@@ -129,7 +129,7 @@ See `ROADMAP.md` for the initial taxonomy.
 
 ## Acceptance criteria to keep in mind
 
-Key invariants from `design/home-finance-spec.md` §14:
+Key invariants from `docs/home-finance-spec.md` §14:
 
 - **A02**: Reimporting an identical file inserts zero new executed transactions
 - **A04**: Two equal purchases on the same date are both retained
@@ -151,8 +151,8 @@ Key invariants from `design/home-finance-spec.md` §14:
 
 ## Design reference
 
-- `design/home-finance-spec.md` — full product specification (authoritative)
-- `design/home-finance-mockup.html` — interactive HTML mockup of the Overview page; open in a browser to see layout and interaction model
+- `docs/home-finance-spec.md` — full product specification (authoritative)
+- `docs/home-finance-mockup.html` — interactive HTML mockup of the Overview page; open in a browser to see layout and interaction model
 - `sample-data/` — real CSV exports (Finnish bank format); **never commit these as test fixtures**; use synthetic data in tests
 
 ## Testing
