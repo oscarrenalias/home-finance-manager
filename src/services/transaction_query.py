@@ -10,7 +10,15 @@ from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session, aliased
 
 from config.categories import CATEGORY_MAP
-from storage.models import Account, AuditEvent, Classification, Transaction
+from storage.models import (
+    Account,
+    AuditEvent,
+    Classification,
+    ImportBatch,
+    SourceObservation,
+    Transaction,
+    TransferLink,
+)
 
 
 PAGE_SIZES = (20, 50, 100)
@@ -296,6 +304,130 @@ def list_transactions(
     ]
 
     return LedgerPage(rows=rows, total_count=total_count, page=page, page_size=page_size)
+
+
+def get_transaction_detail(
+    session: Session, transaction_id: str
+) -> Optional[TransactionDetail]:
+    """Return full detail for a single transaction, or None if not found."""
+
+    result = (
+        session.query(Transaction, Account)
+        .join(Account, Transaction.account_id == Account.id)
+        .filter(Transaction.id == transaction_id)
+        .first()
+    )
+    if result is None:
+        return None
+
+    tx, acct = result
+    active_cls = get_current_classification(session, transaction_id)
+
+    def _resolve_category_name(cat_id: Optional[str]) -> Optional[str]:
+        if cat_id and cat_id in CATEGORY_MAP:
+            return CATEGORY_MAP[cat_id].name
+        return None
+
+    obs_rows = (
+        session.query(SourceObservation, ImportBatch)
+        .join(ImportBatch, SourceObservation.batch_id == ImportBatch.id)
+        .filter(SourceObservation.transaction_id == transaction_id)
+        .all()
+    )
+    source_rows = [
+        SourceObservationRow(
+            batch_filename=batch.filename,
+            import_date=batch.created_at.date() if batch.created_at else None,
+            row_number=obs.row_number,
+            raw_date=obs.raw_date,
+            raw_text=obs.raw_text,
+            raw_amount=obs.raw_amount,
+            raw_balance=obs.raw_balance,
+            raw_status=obs.raw_status,
+            raw_category=obs.raw_category,
+            raw_subcategory=obs.raw_subcategory,
+        )
+        for obs, batch in obs_rows
+    ]
+
+    all_cls = (
+        session.query(Classification)
+        .filter(Classification.transaction_id == transaction_id)
+        .order_by(Classification.created_at.desc())
+        .all()
+    )
+    classification_history = [
+        ClassificationRecord(
+            transaction_type=cls.transaction_type,
+            category_id=cls.category_id,
+            merchant=cls.merchant,
+            source=cls.source,
+            review_state=cls.review_state,
+            rationale=cls.rationale,
+            model_version=cls.model_version,
+            rule_version=cls.rule_version,
+            created_at=cls.created_at,
+        )
+        for cls in all_cls
+    ]
+
+    links = (
+        session.query(TransferLink)
+        .filter(
+            or_(
+                TransferLink.transaction_a_id == transaction_id,
+                TransferLink.transaction_b_id == transaction_id,
+            )
+        )
+        .all()
+    )
+    transfer_links = []
+    for link in links:
+        counterpart_id = (
+            link.transaction_b_id
+            if link.transaction_a_id == transaction_id
+            else link.transaction_a_id
+        )
+        cpt = (
+            session.query(Transaction, Account)
+            .join(Account, Transaction.account_id == Account.id)
+            .filter(Transaction.id == counterpart_id)
+            .first()
+        )
+        if cpt:
+            cpt_tx, cpt_acct = cpt
+            transfer_links.append(
+                TransferLinkInfo(
+                    counterpart_date=cpt_tx.date,
+                    account_name=cpt_acct.name,
+                    amount_cents=cpt_tx.amount_cents,
+                    link_state=link.confirmed_by,
+                )
+            )
+
+    return TransactionDetail(
+        id=tx.id,
+        date=tx.date,
+        account_name=acct.name,
+        display_text=tx.display_text,
+        amount_cents=tx.amount_cents,
+        currency=tx.currency,
+        status=tx.status,
+        transaction_type=active_cls.transaction_type if active_cls else tx.transaction_type,
+        category_id=active_cls.category_id if active_cls else tx.category_id,
+        category_name=_resolve_category_name(
+            active_cls.category_id if active_cls else tx.category_id
+        ),
+        merchant=active_cls.merchant if active_cls else tx.merchant,
+        review_state=active_cls.review_state if active_cls else None,
+        classification_source=active_cls.source if active_cls else tx.classification_source,
+        has_note=bool(tx.note),
+        source_rows=source_rows,
+        classification_history=classification_history,
+        transfer_links=transfer_links,
+        note=tx.note,
+        note_updated_at=tx.note_updated_at,
+    )
 
 
 _NOTE_MAX_LENGTH = 2000
