@@ -38,14 +38,17 @@ These pins were established to resolve confirmed runtime conflicts. Do not chang
 
 ## Module boundaries
 
+All Python packages live under `src/`. Import paths and tooling configuration (pyproject.toml, alembic.ini) reflect this layout.
+
 ```
-ui/        Reflex pages, components, state, event handlers
-domain/    money, transaction semantics, matching rules, reporting, forecasts
-services/  application operations coordinating domain + persistence
-storage/   SQLAlchemy models, repositories, session management, migrations
-llm/       provider adapter, structured schemas, prompts, tool dispatch
-jobs/      durable job acquisition, execution, retries, recovery
-tests/     synthetic fixtures and behavioral tests
+src/ui/        Reflex pages, components, state, event handlers
+src/domain/    money, transaction semantics, matching rules, reporting, forecasts
+src/services/  application operations coordinating domain + persistence
+src/storage/   SQLAlchemy models, repositories, session management, migrations
+src/llm/       provider adapter, structured schemas, prompts, tool dispatch
+src/jobs/      durable job acquisition, execution, retries, recovery
+src/config/    category taxonomy (categories.yaml) loaded at startup
+tests/         synthetic fixtures and behavioral tests
 ```
 
 Domain modules must be importable without Reflex. Never keep an open SQLAlchemy session in UI state or across an LLM network call.
@@ -115,7 +118,7 @@ Release 2 adds: Reserves · Forecast
 
 ## Categories
 
-Defined in `config/categories.yaml` — loaded at startup, restart to retune. Category IDs are plain string references in the DB; the YAML is the single source of truth for names, guidance, and examples. Not stored in the DB; no Settings UI for categories in release 1.
+Defined in `src/config/categories.yaml` — loaded at startup, restart to retune. Category IDs are plain string references in the DB; the YAML is the single source of truth for names, guidance, and examples. Not stored in the DB; no Settings UI for categories in release 1.
 
 See `ROADMAP.md` for the initial taxonomy.
 
@@ -129,7 +132,7 @@ See `ROADMAP.md` for the initial taxonomy.
 
 ## Acceptance criteria to keep in mind
 
-Key invariants from `design/home-finance-spec.md` §14:
+Key invariants from `docs/home-finance-spec.md` §14:
 
 - **A02**: Reimporting an identical file inserts zero new executed transactions
 - **A04**: Two equal purchases on the same date are both retained
@@ -149,10 +152,14 @@ Key invariants from `design/home-finance-spec.md` §14:
 6. Auth, container setup, export/backup/restore, performance measurement (A19)
 7. Release 2 separately after release 1 is usable
 
+## Repository layout history
+
+- **October 2026**: Python packages moved from root level into `src/` (PEP 517 src layout). `pyproject.toml` and `alembic.ini` updated accordingly. The `design/` directory was renamed to `docs/` at the same time.
+
 ## Design reference
 
-- `design/home-finance-spec.md` — full product specification (authoritative)
-- `design/home-finance-mockup.html` — interactive HTML mockup of the Overview page; open in a browser to see layout and interaction model
+- `docs/home-finance-spec.md` — full product specification (authoritative)
+- `docs/home-finance-mockup.html` — interactive HTML mockup of the Overview page; open in a browser to see layout and interaction model
 - `sample-data/` — real CSV exports (Finnish bank format); **never commit these as test fixtures**; use synthetic data in tests
 
 ## Testing
@@ -166,7 +173,7 @@ Key invariants from `design/home-finance-spec.md` §14:
 
 ### Trigger
 
-When a bead's `expected_files` contains any path under `ui/pages/` or `ui/components/`, the tester bead **must** deliver a corresponding UI test file.
+When a bead's `expected_files` contains any path under `src/ui/pages/` or `src/ui/components/`, the tester bead **must** deliver a corresponding UI test file.
 
 ### Deliverable
 

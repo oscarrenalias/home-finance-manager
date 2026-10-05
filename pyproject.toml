@@ -32,11 +32,20 @@ dev = [
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["ui", "domain", "services", "storage", "llm", "jobs"]
+packages = [
+    "src/ui",
+    "src/domain",
+    "src/services",
+    "src/storage",
+    "src/llm",
+    "src/jobs",
+    "src/config",
+]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+pythonpath = ["src"]
 
 [tool.uv.workspace]
 members = []

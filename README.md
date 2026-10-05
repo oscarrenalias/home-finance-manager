@@ -41,7 +41,7 @@ docker-compose down -v
 
 ## Running Migrations
 
-Migrations are managed with Alembic. The migration scripts live in `storage/migrations/versions/`.
+Migrations are managed with Alembic. The migration scripts live in `src/storage/migrations/versions/`.
 
 Apply all pending migrations:
 
@@ -89,15 +89,17 @@ Tests use a temporary SQLite database created and migrated automatically by the 
 
 ## Module Overview
 
+All Python packages live under `src/`. Import paths and tooling configuration (`pyproject.toml`, `alembic.ini`) reflect this layout.
+
 | Module | Purpose |
 | --- | --- |
-| `ui/` | Reflex pages, components, state, and event handlers. Each page under `ui/pages/` maps to an app route. The generated React frontend is served on port 3000; the Reflex backend API and WebSocket run on port 8000. |
-| `domain/` | Pure Python business logic: money value type, transaction semantics, matching rules, classification precedence, reporting calculations, and forecasts. Importable without Reflex. |
-| `services/` | Application-layer operations that coordinate domain logic with persistence. Keeps UI state and database sessions separate. |
-| `storage/` | SQLAlchemy ORM models (`storage/models.py`), session management and engine factory (`storage/database.py`), and Alembic migration environment (`storage/migrations/`). |
-| `llm/` | LLM provider adapter, structured output schemas, prompt templates, and tool dispatch. Talks to the LiteLLM sidecar via an OpenAI-compatible endpoint. |
-| `jobs/` | Durable background job table, worker process (`jobs/worker`), acquisition, retry, and recovery logic. No external queue required. |
-| `config/` | Category taxonomy loaded from `config/categories.yaml` at startup. Category IDs are plain string references in the database; the YAML file is the single source of truth. |
+| `src/ui/` | Reflex pages, components, state, and event handlers. Each page under `src/ui/pages/` maps to an app route. The generated React frontend is served on port 3000; the Reflex backend API and WebSocket run on port 8000. |
+| `src/domain/` | Pure Python business logic: money value type, transaction semantics, matching rules, classification precedence, reporting calculations, and forecasts. Importable without Reflex. |
+| `src/services/` | Application-layer operations that coordinate domain logic with persistence. Keeps UI state and database sessions separate. |
+| `src/storage/` | SQLAlchemy ORM models (`src/storage/models.py`), session management and engine factory (`src/storage/database.py`), and Alembic migration environment (`src/storage/migrations/`). |
+| `src/llm/` | LLM provider adapter, structured output schemas, prompt templates, and tool dispatch. Talks to the LiteLLM sidecar via an OpenAI-compatible endpoint. |
+| `src/jobs/` | Durable background job table, worker process (`src/jobs/worker`), acquisition, retry, and recovery logic. No external queue required. |
+| `src/config/` | Category taxonomy loaded from `src/config/categories.yaml` at startup. Category IDs are plain string references in the database; the YAML file is the single source of truth. |
 | `tests/` | pytest suite with synthetic fixtures and behavioural tests for financial invariants and import identity. |
 
 ### Key files
@@ -107,7 +109,7 @@ Tests use a temporary SQLite database created and migrated automatically by the 
 | `docker-compose.yml` | Defines three services: `app` (Reflex), `worker` (background jobs), and `litellm` (LLM proxy). |
 | `Dockerfile` | Multi-stage image using `python:3.11-slim` and `uv` for dependency installation. |
 | `litellm_config.yaml` | LiteLLM model routing — maps logical names (`classifier`, `analyst`) to provider models. No secrets; keys come from environment variables. |
-| `alembic.ini` | Alembic configuration pointing at `storage/migrations/`. |
+| `alembic.ini` | Alembic configuration pointing at `src/storage/migrations/`. |
 | `rxconfig.py` | Reflex app configuration (app name, database URL passthrough). |
 | `pyproject.toml` | Project metadata, dependency declarations, and pytest configuration. |
 
