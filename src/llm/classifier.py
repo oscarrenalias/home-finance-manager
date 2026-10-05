@@ -49,6 +49,16 @@ class ClassificationResult(BaseModel):
 
 @runtime_checkable
 class AbstractClassifier(Protocol):
+    """Protocol that all classifier implementations must satisfy.
+
+    Contract for classify():
+    - Accepts a ClassificationRequest and returns a ClassificationResult.
+    - Must never raise on valid input; return transaction_type="unknown" with low
+      confidence rather than propagating model or network errors to the caller.
+    - Implementors must NOT log the rationale field at INFO level or above — rationale
+      may contain verbatim bank description text which is treated as untrusted data (A17).
+    """
+
     def classify(self, request: ClassificationRequest) -> ClassificationResult: ...
 
 
@@ -57,6 +67,12 @@ class LiteLLMClassifier:
 
     Env vars are checked on the first classify() call, not at import time,
     so the module is safe to import in tests and workers that never call classify().
+
+    Prompt injection defence (A17): the system prompt explicitly instructs the model to
+    treat the "text" field as raw data, not instructions. The user message is assembled
+    as key-value pairs — display_text is never spliced into an instruction sentence —
+    so a transaction description containing "ignore previous instructions" is treated as
+    opaque data by the model.
     """
 
     def classify(self, request: ClassificationRequest) -> ClassificationResult:

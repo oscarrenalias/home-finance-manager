@@ -1,4 +1,13 @@
-"""Classify-batch job handler — classifies all unclassified transactions in a batch."""
+"""Classify-batch job handler — classifies all unclassified transactions in a batch.
+
+Idempotency (A11): transactions with an existing accepted Classification are skipped at
+the DB query level, so re-running or retrying this job never overwrites a manual override
+or a previously auto-accepted result.
+
+Commit strategy: all Classification and AuditEvent rows produced in a single job run are
+written in one session.commit() call at the end of the loop. This keeps the batch
+atomically consistent — either every classification lands or none do on failure.
+"""
 
 from __future__ import annotations
 
@@ -18,6 +27,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# A16: auto-accept only low-risk suggestions. 0.80 matches the spec threshold — below this
+# the result is queued for human review regardless of transaction type.
 AUTO_ACCEPT_THRESHOLD = 0.80
 
 _TRANSFER_TYPES = frozenset({"internal_transfer", "external_transfer", "contribution"})
