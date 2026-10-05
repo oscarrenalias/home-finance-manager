@@ -555,6 +555,17 @@ def _ledger_row(item: dict) -> rx.Component:
                 rx.text(item["merchant"], size="1", color_scheme="gray"),
                 rx.fragment(),
             ),
+            rx.cond(
+                (item["status"] == "Rejected") | (item["status"] == "Deleted"),
+                rx.badge(
+                    item["status"],
+                    color_scheme="red",
+                    variant="outline",
+                    size="1",
+                    data_testid="status-badge",
+                ),
+                rx.fragment(),
+            ),
             gap="0",
             align_items="start",
             flex="1",
@@ -616,7 +627,29 @@ def _ledger_row(item: dict) -> rx.Component:
 
 def _table_header() -> rx.Component:
     return rx.flex(
-        rx.text("Date", size="1", weight="medium", color_scheme="gray", width="90px", flex_shrink="0"),
+        rx.flex(
+            rx.text(
+                "Date",
+                size="1",
+                weight="medium",
+                color_scheme="gray",
+                cursor="pointer",
+                on_click=TransactionsState.toggle_sort_date,
+            ),
+            rx.cond(
+                TransactionsState.sort == "date_desc",
+                rx.text("↓", size="1", color_scheme="gray"),
+                rx.cond(
+                    TransactionsState.sort == "date_asc",
+                    rx.text("↑", size="1", color_scheme="gray"),
+                    rx.fragment(),
+                ),
+            ),
+            align="center",
+            gap="0.25em",
+            width="90px",
+            flex_shrink="0",
+        ),
         rx.text("Account", size="1", weight="medium", color_scheme="gray", width="130px", flex_shrink="0"),
         rx.text("Description", size="1", weight="medium", color_scheme="gray", flex="1", min_width="0"),
         rx.text("Category", size="1", weight="medium", color_scheme="gray", width="140px", flex_shrink="0"),
