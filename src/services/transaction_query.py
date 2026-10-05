@@ -3,14 +3,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from typing import Optional
 
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session, aliased
 
 from config.categories import CATEGORY_MAP
-from storage.models import Account, Classification, Transaction
+from storage.models import Account, AuditEvent, Classification, Transaction
 
 
 PAGE_SIZES = (20, 50, 100)
@@ -296,3 +296,47 @@ def list_transactions(
     ]
 
     return LedgerPage(rows=rows, total_count=total_count, page=page, page_size=page_size)
+
+
+_NOTE_MAX_LENGTH = 2000
+
+
+def set_note(session: Session, transaction_id: str, note: Optional[str]) -> None:
+    """Set or clear the note on a transaction, recording an AuditEvent on actual change.
+
+    Strips whitespace; stores NULL when the result is empty. Raises ValueError
+    for notes exceeding 2000 characters or when the transaction is not found.
+    note_updated_at is set on every write, including when the note is cleared.
+    No write and no AuditEvent occur when the new value equals the existing value.
+    The caller is responsible for committing.
+    """
+    tx = session.get(Transaction, transaction_id)
+    if tx is None:
+        raise ValueError(f"Transaction {transaction_id!r} not found")
+
+    cleaned: Optional[str] = note.strip() if note else None
+    if not cleaned:
+        cleaned = None
+
+    if cleaned is not None and len(cleaned) > _NOTE_MAX_LENGTH:
+        raise ValueError(
+            f"Note must not exceed {_NOTE_MAX_LENGTH} characters, got {len(cleaned)}"
+        )
+
+    if tx.note == cleaned:
+        return
+
+    old_note = tx.note
+    tx.note = cleaned
+    tx.note_updated_at = datetime.now(timezone.utc)
+
+    session.add(
+        AuditEvent(
+            entity_type="transaction",
+            entity_id=transaction_id,
+            action="note_updated",
+            actor="manual",
+            before_state={"note": old_note},
+            after_state={"note": cleaned},
+        )
+    )
