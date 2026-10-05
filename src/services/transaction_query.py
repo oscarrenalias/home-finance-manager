@@ -261,10 +261,13 @@ def list_transactions(
             .replace("_", "\\_")
         )
         pattern = f"%{escaped}%"
+        # Merchants set by the LLM or a manual edit live on the classification row,
+        # so match the active classification's merchant as well as the transaction's.
         predicates.append(
             or_(
                 Transaction.display_text.ilike(pattern, escape="\\"),
                 Transaction.merchant.ilike(pattern, escape="\\"),
+                ActiveCls.merchant.ilike(pattern, escape="\\"),
                 Transaction.note.ilike(pattern, escape="\\"),
             )
         )

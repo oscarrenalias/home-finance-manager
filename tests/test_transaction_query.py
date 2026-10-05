@@ -486,6 +486,28 @@ class TestSearch:
         page = list_transactions(session, LedgerFilters(search="PRISMA"))
         assert any(r.id == t.id for r in page.rows)
 
+    def test_search_matches_merchant_on_active_classification(self, session, account):
+        """Merchants assigned by the LLM or a manual edit are stored on Classification only."""
+        t = _tx(session, account.id, display_text="CARD PAYMENT 4411")
+        session.commit()
+        _cls(session, t.id, merchant="Prisma", review_state="needs_review", source="llm")
+        session.commit()
+        page = list_transactions(session, LedgerFilters(search="prisma"))
+        assert [r.id for r in page.rows] == [t.id]
+        assert page.rows[0].merchant == "Prisma"
+
+    def test_search_ignores_merchant_on_superseded_classification(self, session, account):
+        """Only the active classification's merchant is searchable, not older history rows."""
+        t = _tx(session, account.id, display_text="CARD PAYMENT 4412")
+        session.commit()
+        _cls(session, t.id, merchant="Old Shop", review_state="needs_review", source="llm",
+             created_at=datetime(2026, 6, 1, 10, 0))
+        _cls(session, t.id, merchant="Lidl", review_state="accepted", source="manual",
+             created_at=datetime(2026, 6, 2, 10, 0))
+        session.commit()
+        assert list_transactions(session, LedgerFilters(search="lidl")).total_count == 1
+        assert list_transactions(session, LedgerFilters(search="old shop")).total_count == 0
+
     def test_search_note_case_insensitive(self, session, account):
         t = _tx(session, account.id, display_text="PAYMENT", note="Holiday groceries")
         session.commit()
