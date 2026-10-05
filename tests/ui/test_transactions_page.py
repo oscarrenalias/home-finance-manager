@@ -51,19 +51,23 @@ def _clear_ledger(db_url: str) -> None:
         engine.dispose()
 
 
-def _current_classification(db_url: str, tx_id: str) -> tuple[str, str, str] | None:
-    """Return (transaction_type, source, review_state) of the newest classification row."""
+def _classifications(db_url: str, tx_id: str) -> list[tuple[str, str, str]]:
+    """Return every (transaction_type, source, review_state) row for a transaction.
+
+    Not ordered by created_at: SQLite timestamps have one-second resolution, so a
+    seeded row and an edit made in the same second would tie.
+    """
     engine = _engine(db_url)
     try:
         with engine.connect() as conn:
-            row = conn.execute(
+            rows = conn.execute(
                 sa.text(
                     "SELECT transaction_type, source, review_state FROM classifications "
-                    "WHERE transaction_id = :tx ORDER BY created_at DESC LIMIT 1"
+                    "WHERE transaction_id = :tx"
                 ),
                 {"tx": tx_id},
-            ).first()
-        return tuple(row) if row else None
+            ).all()
+        return [tuple(r) for r in rows]
     finally:
         engine.dispose()
 
@@ -351,12 +355,16 @@ def test_detail_panel_edit_classification_golden_path(
         amount_cents=-500,
         tx_date=datetime.date(2030, 8, 1),
     )
+    # An LLM suggestion awaiting review; the manual edit must then win on review_state,
+    # not on created_at (SQLite timestamps tie within the same second).
     _add_classification(
         app_db_url,
         tx_id,
         transaction_type="expense",
         category_id="groceries",
         merchant="Lidl",
+        review_state="needs_review",
+        source="llm",
     )
 
     page.goto(f"{app_server}/transactions", wait_until="networkidle")
@@ -387,7 +395,10 @@ def test_detail_panel_edit_classification_golden_path(
     # AC-12: the row updates in place, and the edit is stored as a manual override (A11).
     expect(row.get_by_test_id("ledger-row-type")).to_have_text("income", timeout=_INTERACT_TIMEOUT_MS)
     expect(page.get_by_test_id("ledger-error-banner")).to_have_count(0)
-    assert _current_classification(app_db_url, tx_id) == ("income", "manual", "accepted")
+    stored = _classifications(app_db_url, tx_id)
+    assert ("income", "manual", "accepted") in stored, stored
+    assert ("expense", "llm", "needs_review") in stored, stored
+    assert len(stored) == 2, f"expected the LLM row plus one manual override, got {stored}"
 
 
 def test_detail_panel_all_sections_visible(
@@ -412,16 +423,24 @@ def test_detail_panel_all_sections_visible(
     panel = page.get_by_test_id("transaction-detail-panel")
     expect(panel).to_be_visible(timeout=_INTERACT_TIMEOUT_MS)
 
-    # All three sections must be present in the panel DOM (even if empty)
-    expect(panel.get_by_test_id("detail-source-rows")).to_be_visible(
-        timeout=_INTERACT_TIMEOUT_MS
-    )
-    expect(panel.get_by_test_id("detail-classification-history")).to_be_visible(
-        timeout=_INTERACT_TIMEOUT_MS
-    )
+    # Transfer links are always shown; source rows and history start collapsed.
     expect(panel.get_by_test_id("detail-transfer-links")).to_be_visible(
         timeout=_INTERACT_TIMEOUT_MS
     )
+    expect(panel.get_by_test_id("detail-source-rows")).to_have_count(0)
+    expect(panel.get_by_test_id("detail-classification-history")).to_have_count(0)
+
+    toggle = panel.get_by_test_id("detail-details-toggle")
+    toggle.click()
+    expect(panel.get_by_test_id("detail-source-rows")).to_be_visible(timeout=_INTERACT_TIMEOUT_MS)
+    expect(panel.get_by_test_id("detail-source-rows")).to_contain_text("No source rows.")
+    expect(panel.get_by_test_id("detail-classification-history")).to_be_visible()
+    expect(panel.get_by_test_id("detail-classification-history")).to_contain_text(
+        "No classification history."
+    )
+
+    toggle.click()
+    expect(panel.get_by_test_id("detail-source-rows")).to_have_count(0, timeout=_INTERACT_TIMEOUT_MS)
 
 
 # ---------------------------------------------------------------------------

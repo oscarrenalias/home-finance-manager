@@ -120,6 +120,7 @@ class TransactionsState(rx.State):
     detail_note: str = ""
     detail_note_updated_at: str = ""
     detail_error: str = ""
+    details_open: bool = False  # source rows + classification history, collapsed by default
 
     # ---- classification edit form ----
     edit_type: str = ""
@@ -292,6 +293,7 @@ class TransactionsState(rx.State):
     # ---- detail panel helpers ----
 
     def _clear_detail(self) -> None:
+        self.details_open = False
         self.detail_display_text = ""
         self.detail_source_rows = []
         self.detail_classification_history = []
@@ -392,6 +394,10 @@ class TransactionsState(rx.State):
     def close_detail(self) -> None:
         self.selected_transaction_id = ""
         self._clear_detail()
+
+    @rx.event
+    def toggle_details(self) -> None:
+        self.details_open = not self.details_open
 
     @rx.event
     def set_edit_type(self, val: str) -> None:
@@ -885,20 +891,35 @@ def _filter_bar() -> rx.Component:
 
 
 def _detail_kv(label: str, val) -> rx.Component:
-    """Render a key-value row inside the detail panel."""
-    return rx.flex(
-        rx.text(label + ":", size="1", color_scheme="gray", width="130px", flex_shrink="0"),
-        rx.text(val, size="1"),
-        align="start",
-        gap="0.5em",
+    """Compact key-value row; hidden when the value is empty."""
+    return rx.cond(
+        val,
+        rx.flex(
+            rx.text(label, size="1", color_scheme="gray", width="105px", flex_shrink="0"),
+            rx.text(val, size="1"),
+            align="start",
+            gap="0.5em",
+            width="100%",
+        ),
+        rx.fragment(),
+    )
+
+
+def _detail_card(*children, testid: str) -> rx.Component:
+    return rx.box(
+        *children,
+        padding="0.5em 0.75em",
+        border="1px solid var(--gray-4)",
+        border_radius="0.4em",
         width="100%",
+        data_testid=testid,
     )
 
 
 def _source_row_item(sr: dict) -> rx.Component:
-    return rx.box(
+    return _detail_card(
         _detail_kv("File", sr["batch_filename"]),
-        _detail_kv("Import date", sr["import_date"]),
+        _detail_kv("Imported", sr["import_date"]),
         _detail_kv("Row #", sr["row_number"]),
         _detail_kv("Raw date", sr["raw_date"]),
         _detail_kv("Description", sr["raw_text"]),
@@ -906,29 +927,82 @@ def _source_row_item(sr: dict) -> rx.Component:
         _detail_kv("Balance", sr["raw_balance"]),
         _detail_kv("Status", sr["raw_status"]),
         _detail_kv("Bank category", sr["raw_category"]),
-        _detail_kv("Bank subcategory", sr["raw_subcategory"]),
-        padding="0.75em",
-        border="1px solid var(--gray-4)",
-        border_radius="0.4em",
-        data_testid="source-row-item",
+        _detail_kv("Subcategory", sr["raw_subcategory"]),
+        testid="source-row-item",
     )
 
 
 def _classification_history_item(ch: dict) -> rx.Component:
-    return rx.box(
+    return _detail_card(
         _detail_kv("Type", ch["transaction_type"]),
         _detail_kv("Category", ch["category_name"]),
         _detail_kv("Merchant", ch["merchant"]),
         _detail_kv("Source", ch["source"]),
         _detail_kv("Review state", ch["review_state"]),
         _detail_kv("Rationale", ch["rationale"]),
-        _detail_kv("Model version", ch["model_version"]),
-        _detail_kv("Rule version", ch["rule_version"]),
+        _detail_kv("Model", ch["model_version"]),
+        _detail_kv("Rule", ch["rule_version"]),
         _detail_kv("Created", ch["created_at"]),
-        padding="0.75em",
-        border="1px solid var(--gray-4)",
-        border_radius="0.4em",
-        data_testid="classification-history-item",
+        testid="classification-history-item",
+    )
+
+
+def _detail_column(title: str, has_items, items, render, empty_text: str, testid: str) -> rx.Component:
+    return rx.vstack(
+        rx.text(title, weight="medium", size="2"),
+        rx.cond(
+            has_items,
+            rx.vstack(rx.foreach(items, render), gap="0.5em", width="100%"),
+            rx.text(empty_text, size="1", color_scheme="gray"),
+        ),
+        gap="0.4em",
+        flex="1 1 320px",
+        min_width="0",
+        align_items="start",
+        data_testid=testid,
+    )
+
+
+def _details_section() -> rx.Component:
+    """Source rows and classification history, side by side, behind a toggle."""
+    return rx.box(
+        rx.button(
+            rx.cond(TransactionsState.details_open, "▾ Details", "▸ Details"),
+            variant="ghost",
+            size="1",
+            color_scheme="gray",
+            on_click=TransactionsState.toggle_details,
+            data_testid="detail-details-toggle",
+        ),
+        rx.cond(
+            TransactionsState.details_open,
+            rx.flex(
+                _detail_column(
+                    "Source rows",
+                    TransactionsState.has_source_rows,
+                    TransactionsState.detail_source_rows,
+                    _source_row_item,
+                    "No source rows.",
+                    "detail-source-rows",
+                ),
+                _detail_column(
+                    "Classification history",
+                    TransactionsState.has_classification_history,
+                    TransactionsState.detail_classification_history,
+                    _classification_history_item,
+                    "No classification history.",
+                    "detail-classification-history",
+                ),
+                gap="1em",
+                wrap="wrap",
+                align="start",
+                width="100%",
+                margin_top="0.5em",
+            ),
+            rx.fragment(),
+        ),
+        margin_top="1.25em",
+        width="100%",
     )
 
 
@@ -1133,49 +1207,6 @@ def _detail_panel() -> rx.Component:
             ),
             rx.fragment(),
         ),
-        # Source rows section
-        rx.text("Source rows", weight="medium", size="2", margin_bottom="0.5em"),
-        rx.cond(
-            TransactionsState.has_source_rows,
-            rx.vstack(
-                rx.foreach(TransactionsState.detail_source_rows, _source_row_item),
-                gap="0.5em",
-                width="100%",
-                data_testid="detail-source-rows",
-            ),
-            rx.text(
-                "No source rows.",
-                size="2",
-                color_scheme="gray",
-                data_testid="detail-source-rows",
-            ),
-        ),
-        # Classification history section
-        rx.text(
-            "Classification history",
-            weight="medium",
-            size="2",
-            margin_top="1.25em",
-            margin_bottom="0.5em",
-        ),
-        rx.cond(
-            TransactionsState.has_classification_history,
-            rx.vstack(
-                rx.foreach(
-                    TransactionsState.detail_classification_history,
-                    _classification_history_item,
-                ),
-                gap="0.5em",
-                width="100%",
-                data_testid="detail-classification-history",
-            ),
-            rx.text(
-                "No classification history.",
-                size="2",
-                color_scheme="gray",
-                data_testid="detail-classification-history",
-            ),
-        ),
         # Edit classification form
         _edit_classification_form(),
         # Note editor
@@ -1203,6 +1234,7 @@ def _detail_panel() -> rx.Component:
                 data_testid="detail-transfer-links",
             ),
         ),
+        _details_section(),
         padding="1.25em",
         border_top="2px solid var(--accent-6)",
         background="var(--accent-2)",
