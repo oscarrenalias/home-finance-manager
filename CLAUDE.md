@@ -15,7 +15,7 @@ Two accounts are in scope for the first release:
 | UI + backend | Reflex (Python-authored multipage app, generated React frontend) |
 | Business logic | Plain Python modules, never imported Reflex |
 | Data access | SQLAlchemy + Alembic; keep models PostgreSQL-compatible |
-| Database | SQLite, local persistent storage |
+| Database | PostgreSQL 16 (production via Docker Compose); SQLite fallback for local dev and tests |
 | Validation | Pydantic |
 | CSV parsing | Python stdlib `csv` + `Decimal` — no float arithmetic |
 | LLM stack | LangChain (conversational orchestration, memory, tool dispatch, retry) |
@@ -24,7 +24,7 @@ Two accounts are in scope for the first release:
 | Jobs | Database job table + single Python worker (no Celery/Redis) |
 | Tests | pytest |
 | Packaging | Docker containers, deployed via docker-compose |
-| Volumes | Persistent volumes for the SQLite database and raw import files |
+| Volumes | Persistent volumes for PostgreSQL data (`pg_data`) and raw import files (`import_files`) |
 
 Not planned for the first release: microservices, vector databases, autonomous agents, FastAPI as a separate service, Redis, or Celery. These are defaults, not hard prohibitions — revisit when there is a concrete reason.
 

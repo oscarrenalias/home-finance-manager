@@ -111,7 +111,7 @@ All Python packages live under `src/`. Import paths and tooling configuration (`
 
 | File | Purpose |
 | --- | --- |
-| `docker-compose.yml` | Defines three services: `app` (Reflex), `worker` (background jobs), and `litellm` (LLM proxy). |
+| `docker-compose.yml` | Defines five services: `db` (PostgreSQL 16), `migrate` (one-shot Alembic runner), `app` (Reflex), `worker` (background jobs), and `litellm` (LLM proxy). |
 | `Dockerfile` | Multi-stage image using `python:3.11-slim` and `uv` for dependency installation. |
 | `litellm_config.yaml` | LiteLLM model routing — maps logical names (`classifier`, `analyst`) to provider models. No secrets; keys come from environment variables. |
 | `alembic.ini` | Alembic configuration pointing at `src/storage/migrations/`. |
