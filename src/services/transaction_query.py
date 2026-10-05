@@ -257,10 +257,10 @@ def list_transactions(
 
     # -------------------------------------------------------------------- sort
     _sort_clauses = {
-        "date_desc": [Transaction.date.desc(), Transaction.created_at.desc(), Transaction.id.desc()],
-        "date_asc":  [Transaction.date.asc(),  Transaction.created_at.asc(),  Transaction.id.asc()],
+        "date_desc":   [Transaction.date.desc(),         Transaction.created_at.desc(), Transaction.id.desc()],
+        "date_asc":    [Transaction.date.asc(),          Transaction.created_at.desc(), Transaction.id.desc()],
         "amount_desc": [Transaction.amount_cents.desc(), Transaction.created_at.desc(), Transaction.id.desc()],
-        "amount_asc":  [Transaction.amount_cents.asc(),  Transaction.created_at.asc(),  Transaction.id.asc()],
+        "amount_asc":  [Transaction.amount_cents.asc(),  Transaction.created_at.desc(), Transaction.id.desc()],
     }
     q = q.order_by(*_sort_clauses[sort])
 
