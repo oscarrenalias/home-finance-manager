@@ -237,6 +237,39 @@ class TestGetCurrentClassification:
         assert result is not None
         assert result.id == older_accepted.id
 
+    def test_older_accepted_wins_over_newer_needs_review(self, session, account):
+        """A11: manual-accepted classification beats a newer model-generated needs_review row.
+
+        Simulates a classify-batch rerun that inserts a newer needs_review row after the
+        user has already manually accepted the transaction.  The accepted row must still
+        be returned as the active classification.
+        """
+        tx = _tx(session, account.id)
+        session.commit()
+        t1 = datetime(2026, 1, 1, tzinfo=timezone.utc)
+        t2 = datetime(2026, 1, 2, tzinfo=timezone.utc)
+        manual_accepted = _cls(
+            session, tx.id,
+            transaction_type="expense",
+            category_id="groceries",
+            review_state="accepted",
+            source="manual",
+            created_at=t1,
+        )
+        _cls(
+            session, tx.id,
+            transaction_type="unknown",
+            review_state="needs_review",
+            source="model",
+            created_at=t2,
+        )
+        session.commit()
+        result = get_current_classification(session, tx.id)
+        assert result is not None
+        assert result.id == manual_accepted.id
+        assert result.review_state == "accepted"
+        assert result.transaction_type == "expense"
+
 
 # ---------------------------------------------------------------------------
 # AC-1 — list_transactions basic behaviour
@@ -753,7 +786,7 @@ def test_two_identical_purchases_same_date_both_retained(session, account):
 
 
 # ---------------------------------------------------------------------------
-# AC-11 — review.py and transaction_query agree on active classification
+# AC-11 — manual classification survives model reruns and reimport
 # ---------------------------------------------------------------------------
 
 
@@ -761,7 +794,7 @@ def test_get_current_classification_matches_list_transactions_active_cls(
     session, account
 ):
     """Consistency check: get_current_classification and list_transactions both use the
-    same active classification logic — the same function is shared.
+    same active classification logic.
 
     Seed a transaction with two Classifications (older accepted, newer rejected).
     Both get_current_classification and the transaction_type returned by
@@ -794,6 +827,54 @@ def test_get_current_classification_matches_list_transactions_active_cls(
     assert row is not None
     assert row.transaction_type == "expense"
     assert row.category_id == "groceries"
+
+
+def test_a11_manual_accepted_beats_newer_needs_review_in_list(session, account):
+    """A11: manual-accepted classification survives a classify-batch rerun.
+
+    After a model rerun inserts a newer needs_review classification, both
+    get_current_classification and list_transactions must still surface the
+    accepted row — not the newer needs_review one.
+
+    This test documents that A11 is enforced at the QUERY layer: accepted rows
+    are sorted before needs_review rows regardless of creation timestamp.
+    """
+    tx = _tx(session, account.id, display_text="A11 RERUN TEST")
+    session.commit()
+
+    t1 = datetime(2026, 3, 1, tzinfo=timezone.utc)
+    t2 = datetime(2026, 3, 2, tzinfo=timezone.utc)  # later — simulates model rerun
+    manual_cls = _cls(
+        session, tx.id,
+        transaction_type="expense",
+        category_id="groceries",
+        review_state="accepted",
+        source="manual",
+        created_at=t1,
+    )
+    _cls(
+        session, tx.id,
+        transaction_type="unknown",
+        review_state="needs_review",
+        source="model",
+        created_at=t2,
+    )
+    session.commit()
+
+    # Query-layer: accepted wins over the newer needs_review row
+    active = get_current_classification(session, tx.id)
+    assert active is not None
+    assert active.id == manual_cls.id
+    assert active.review_state == "accepted"
+    assert active.transaction_type == "expense"
+
+    # list_transactions must surface the same result
+    page = list_transactions(session, LedgerFilters())
+    row = next((r for r in page.rows if r.id == tx.id), None)
+    assert row is not None
+    assert row.transaction_type == "expense"
+    assert row.category_id == "groceries"
+    assert row.review_state == "accepted"
 
 
 # ---------------------------------------------------------------------------

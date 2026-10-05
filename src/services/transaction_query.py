@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
 from typing import Optional
 
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import and_, case, func, or_, select
 from sqlalchemy.orm import Session, aliased
 
 from config.categories import CATEGORY_MAP
@@ -116,10 +116,11 @@ class TransactionDetail(LedgerRow):
 def get_current_classification(
     session: Session, transaction_id: str
 ) -> Optional[Classification]:
-    """Return the most-recent non-rejected Classification row for a transaction, or None.
+    """Return the active Classification row for a transaction, or None.
 
-    Mirrors the rule used in review.py::_transaction_to_dict so that the Review
-    page and the ledger always agree on which classification is active.
+    "Active" = the accepted row if one exists, otherwise the newest non-rejected row.
+    This ordering enforces A11: a manual-accepted classification survives a later
+    model rerun that inserts a newer needs_review row — accepted always wins.
     """
     return (
         session.query(Classification)
@@ -127,7 +128,13 @@ def get_current_classification(
             Classification.transaction_id == transaction_id,
             Classification.review_state != "rejected",
         )
-        .order_by(Classification.created_at.desc())
+        .order_by(
+            case(
+                (Classification.review_state == "accepted", 0),
+                else_=1,
+            ).asc(),
+            Classification.created_at.desc(),
+        )
         .first()
     )
 
@@ -152,15 +159,23 @@ def list_transactions(
     if sort not in _VALID_SORTS:
         raise ValueError(f"sort must be one of {_VALID_SORTS}, got {sort!r}")
 
-    # Correlated scalar subquery: ID of the most recent non-rejected Classification
-    # for the current Transaction row.  Returns NULL when no such row exists.
+    # Correlated scalar subquery: ID of the active Classification for the current
+    # Transaction row.  Returns NULL when no non-rejected row exists.
+    # Accepted rows always win over needs_review (A11), then newest-first.
     active_cls_id_sq = (
         select(Classification.id)
         .where(
             Classification.transaction_id == Transaction.id,
             Classification.review_state != "rejected",
         )
-        .order_by(Classification.created_at.desc(), Classification.id.desc())
+        .order_by(
+            case(
+                (Classification.review_state == "accepted", 0),
+                else_=1,
+            ).asc(),
+            Classification.created_at.desc(),
+            Classification.id.desc(),
+        )
         .limit(1)
         .correlate(Transaction)
         .scalar_subquery()
