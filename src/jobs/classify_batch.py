@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 AUTO_ACCEPT_THRESHOLD = 0.80
 CHUNK_SIZE = 50
 
-_TRANSFER_TYPES = frozenset({"internal_transfer", "external_transfer", "contribution"})
+_ALWAYS_REVIEW_TYPES = frozenset({"internal_transfer", "external_transfer", "contribution", "unknown"})
 
 
 def handle_classify_batch(
@@ -94,10 +94,10 @@ def handle_classify_batch(
         results = classifier.classify_many(requests)
 
         for txn, result in zip(chunk, results):
-            is_transfer = result.transaction_type in _TRANSFER_TYPES
+            always_review = result.transaction_type in _ALWAYS_REVIEW_TYPES
             review_state = (
                 "needs_review"
-                if is_transfer or result.confidence < AUTO_ACCEPT_THRESHOLD
+                if always_review or result.confidence < AUTO_ACCEPT_THRESHOLD
                 else "accepted"
             )
 
