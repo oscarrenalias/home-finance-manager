@@ -53,7 +53,9 @@ def fresh_db():
 
 
 def test_upgrade_head_creates_all_tables(fresh_db):
-    command.upgrade(_make_alembic_cfg(fresh_db), "head")
+    # Use the explicit SQLite-chain head; "head" is ambiguous now that the
+    # postgres branch adds a second root revision.
+    command.upgrade(_make_alembic_cfg(fresh_db), "e4f5a6b7c8d9")
     assert ALL_TABLES == _table_names(fresh_db)
 
 
@@ -62,7 +64,7 @@ def test_downgrade_removes_new_tables(fresh_db):
     # and classifications/audit_events/jobs (-3) to reach the initial core-tables
     # revision (6d9b6bbbe14a), leaving only core tables.
     cfg = _make_alembic_cfg(fresh_db)
-    command.upgrade(cfg, "head")
+    command.upgrade(cfg, "e4f5a6b7c8d9")
     command.downgrade(cfg, "-3")
     remaining = _table_names(fresh_db)
     assert NEW_TABLES.isdisjoint(remaining), f"New tables still present: {NEW_TABLES & remaining}"
@@ -71,22 +73,22 @@ def test_downgrade_removes_new_tables(fresh_db):
 
 def test_downgrade_base_removes_all_tables(fresh_db):
     cfg = _make_alembic_cfg(fresh_db)
-    command.upgrade(cfg, "head")
+    command.upgrade(cfg, "e4f5a6b7c8d9")
     command.downgrade(cfg, "base")
     assert _table_names(fresh_db) == set()
 
 
 def test_reimport_upgrade_downgrade_upgrade(fresh_db):
     cfg = _make_alembic_cfg(fresh_db)
-    command.upgrade(cfg, "head")
+    command.upgrade(cfg, "e4f5a6b7c8d9")
     command.downgrade(cfg, "-1")
-    command.upgrade(cfg, "head")
+    command.upgrade(cfg, "e4f5a6b7c8d9")
     assert ALL_TABLES == _table_names(fresh_db)
 
 
 def test_fk_classifications_transaction_id_enforced(fresh_db):
     cfg = _make_alembic_cfg(fresh_db)
-    command.upgrade(cfg, "head")
+    command.upgrade(cfg, "e4f5a6b7c8d9")
 
     engine = create_engine(fresh_db, connect_args={"check_same_thread": False})
 

@@ -1,6 +1,7 @@
 FROM python:3.11-slim
 
 # curl: health checks; unzip: required by Reflex 0.9.x bun installer
+# psycopg2-binary bundles libpq — no libpq-dev needed here (only required for source builds of psycopg2)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     unzip \

@@ -13,6 +13,7 @@ dependencies = [
     # Data access layer
     "sqlalchemy>=2.0.36,<3.0",
     "alembic>=1.13.0,<2.0",
+    "psycopg2-binary>=2.9,<3.0",
     # Validation
     "pydantic>=2.9.0,<3.0",
     # LLM orchestration

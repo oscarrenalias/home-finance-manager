@@ -1,12 +1,29 @@
 services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: finances
+      POSTGRES_PASSWORD: finances
+      POSTGRES_DB: finances
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "finances", "-d", "finances"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
   migrate:
     build: .
     command: uv run alembic upgrade head
     restart: "no"
-    volumes:
-      - db_data:/data/db
     env_file:
       - .env
+    depends_on:
+      db:
+        condition: service_healthy
 
   app:
     build: .
@@ -15,13 +32,14 @@ services:
       - "3000:3000"
       - "8000:8000"
     volumes:
-      - db_data:/data/db
       - import_files:/data/imports
     env_file:
       - .env
     depends_on:
       migrate:
         condition: service_completed_successfully
+      db:
+        condition: service_healthy
       litellm:
         condition: service_started
     restart: unless-stopped
@@ -36,13 +54,14 @@ services:
     build: .
     command: uv run python -m jobs.worker
     volumes:
-      - db_data:/data/db
       - import_files:/data/imports
     env_file:
       - .env
     depends_on:
       migrate:
         condition: service_completed_successfully
+      db:
+        condition: service_healthy
       litellm:
         condition: service_started
     restart: unless-stopped
@@ -60,5 +79,5 @@ services:
     restart: unless-stopped
 
 volumes:
-  db_data:
+  pg_data:
   import_files:

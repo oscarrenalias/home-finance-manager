@@ -15,7 +15,7 @@ Two accounts are in scope for the first release:
 | UI + backend | Reflex (Python-authored multipage app, generated React frontend) |
 | Business logic | Plain Python modules, never imported Reflex |
 | Data access | SQLAlchemy + Alembic; keep models PostgreSQL-compatible |
-| Database | SQLite, local persistent storage |
+| Database | PostgreSQL 16 (production via Docker Compose); SQLite fallback for local dev and tests |
 | Validation | Pydantic |
 | CSV parsing | Python stdlib `csv` + `Decimal` — no float arithmetic |
 | LLM stack | LangChain (conversational orchestration, memory, tool dispatch, retry) |
@@ -24,7 +24,7 @@ Two accounts are in scope for the first release:
 | Jobs | Database job table + single Python worker (no Celery/Redis) |
 | Tests | pytest |
 | Packaging | Docker containers, deployed via docker-compose |
-| Volumes | Persistent volumes for the SQLite database and raw import files |
+| Volumes | Persistent volumes for PostgreSQL data (`pg_data`) and raw import files (`import_files`) |
 
 Not planned for the first release: microservices, vector databases, autonomous agents, FastAPI as a separate service, Redis, or Celery. These are defaults, not hard prohibitions — revisit when there is a concrete reason.
 
@@ -35,6 +35,7 @@ These pins were established to resolve confirmed runtime conflicts. Do not chang
 - **`reflex>=0.9.0,<1.0`** — Reflex 0.7.x contains a `pydantic_v1_patch()` shim in `reflex/utils/compat.py` that breaks `sqlmodel>=0.0.46` at import time (`cannot import name 'Discriminator' from 'pydantic.v1'`). Reflex 0.9.x removed this shim.
 - **`sqlmodel<0.0.47`** — Keep pinned until confirmed compatible with the chosen Reflex version.
 - **`unzip` in Dockerfile** — Reflex 0.9.x installs bun at first run; bun's installer requires `unzip`. The `Dockerfile` apt-get layer must always include `unzip` alongside `curl`.
+- **`psycopg2-binary>=2.9,<3.0`** — bundles `libpq` so the container image needs no additional system packages (no `libpq-dev`). Use `psycopg2-binary` (not `psycopg2`) unless you are building from source. Tests always run against SQLite and do not exercise this driver at runtime.
 
 ## Module boundaries
 
