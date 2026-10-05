@@ -50,11 +50,20 @@ def _classify_with_mock(monkeypatch, request, mock_result):
     monkeypatch.setenv("LITELLM_BASE_URL", "http://localhost:4000")
     monkeypatch.setenv("LITELLM_MASTER_KEY", "sk-test")
 
-    from llm.classifier import BatchClassificationResult
+    from llm.classifier import BatchClassificationResult, ClassifiedItem
+
+    classified_item = ClassifiedItem(
+        transaction_id=request.transaction_id,
+        transaction_type=mock_result.transaction_type,
+        category_id=mock_result.category_id,
+        merchant=mock_result.merchant,
+        confidence=mock_result.confidence,
+        rationale=mock_result.rationale,
+    )
 
     with patch("langchain_openai.ChatOpenAI") as mock_chat:
         chain_mock = MagicMock()
-        chain_mock.invoke.return_value = BatchClassificationResult(results=[mock_result])
+        chain_mock.invoke.return_value = BatchClassificationResult(classified=[classified_item], unclassified=[])
         mock_chat.return_value.with_structured_output.return_value = chain_mock
 
         from llm.classifier import LiteLLMClassifier
