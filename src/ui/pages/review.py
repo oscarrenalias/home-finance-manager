@@ -109,6 +109,7 @@ from config.categories import CATEGORIES
 import services.classification_service as classification_service
 import services.transfer_service as transfer_service
 from services.transfer_service import find_transfer_candidates as _find_transfer_candidates
+from services.transaction_query import get_current_classification
 from storage.database import _get_session_factory
 from storage.models import Account, Classification, Transaction
 from ui.components import shell
@@ -143,18 +144,13 @@ _TYPE_COLORS: dict[str, str] = {
 }
 
 
-def _transaction_to_dict(txn: Transaction) -> dict:
+def _transaction_to_dict(txn: Transaction, session) -> dict:
     """Convert a Transaction ORM row to a serialisable plain dict.
 
-    Accesses txn.classifications while the session is still open (caller's
-    responsibility). The most recent non-rejected Classification drives the
+    Session must be open. The most recent non-rejected Classification drives the
     displayed type and category; falls back to the Transaction's own fields.
     """
-    pending_cls = None
-    for cls in sorted(txn.classifications, key=lambda c: c.created_at, reverse=True):
-        if cls.review_state != "rejected":
-            pending_cls = cls
-            break
+    pending_cls = get_current_classification(session, txn.id)
 
     txn_type = (
         (pending_cls.transaction_type if pending_cls else None)
@@ -382,7 +378,7 @@ class ReviewState(rx.State):
                 .order_by(Transaction.date.desc(), Transaction.created_at.desc())
                 .all()
             )
-            items = [_transaction_to_dict(t) for t in txns]
+            items = [_transaction_to_dict(t, session) for t in txns]
             self.error_message = ""
         except Exception as exc:
             self.error_message = str(exc)
