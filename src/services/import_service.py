@@ -421,13 +421,6 @@ class ImportService:
                         )
                         session.add(obs)
 
-                        job = Job(
-                            kind="classify",
-                            state="pending",
-                            inputs={"transaction_id": txn_id},
-                        )
-                        session.add(job)
-
                         new_executed_transactions.append(txn)
                         new_transactions += 1
                         enqueued_jobs += 1

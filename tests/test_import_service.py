@@ -197,7 +197,7 @@ class TestCommitBasic:
         try:
             assert session.query(Transaction).filter(Transaction.account_id == account.id).count() == 1
             assert session.query(SourceObservation).count() == 1
-            assert session.query(Job).filter(Job.kind == "classify").count() == 1
+            assert session.query(Job).filter(Job.kind == "classify_batch").count() == 1
         finally:
             session.close()
 
