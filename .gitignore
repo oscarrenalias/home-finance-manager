@@ -17,3 +17,6 @@ assets/external/
 .takt/memory/
 **/.takt/memory/
 data/
+.DS_Store
+.claude/settings.local.json
+sample-data/
