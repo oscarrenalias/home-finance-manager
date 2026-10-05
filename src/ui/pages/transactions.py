@@ -9,10 +9,12 @@ from urllib.parse import parse_qs
 import reflex as rx
 
 from config.categories import CATEGORIES, CATEGORY_MAP
+from services import classification_service
 from services.transaction_query import (
     LedgerFilters,
     LedgerRow,
     PAGE_SIZES,
+    TransactionDetail,
     get_transaction_detail,
     list_transactions,
 )
@@ -116,6 +118,12 @@ class TransactionsState(rx.State):
     detail_note: str = ""
     detail_note_updated_at: str = ""
     detail_error: str = ""
+
+    # ---- classification edit form ----
+    edit_type: str = ""
+    edit_category_id: str = ""  # "__none__" means no category
+    edit_merchant: str = ""
+    detail_save_error: str = ""
 
     # ---- computed vars ----
 
@@ -273,6 +281,70 @@ class TransactionsState(rx.State):
         self.detail_note = ""
         self.detail_note_updated_at = ""
         self.detail_error = ""
+        self.edit_type = ""
+        self.edit_category_id = ""
+        self.edit_merchant = ""
+        self.detail_save_error = ""
+
+    def _apply_detail(self, d: TransactionDetail) -> None:
+        """Apply a TransactionDetail to state vars; does not touch selected_transaction_id."""
+        self.detail_display_text = d.display_text or ""
+        self.detail_source_rows = [
+            {
+                "batch_filename": sr.batch_filename,
+                "import_date": sr.import_date.strftime("%d.%m.%Y") if sr.import_date else "",
+                "row_number": str(sr.row_number),
+                "raw_date": sr.raw_date,
+                "raw_text": sr.raw_text,
+                "raw_amount": sr.raw_amount,
+                "raw_balance": sr.raw_balance or "",
+                "raw_status": sr.raw_status,
+                "raw_category": sr.raw_category,
+                "raw_subcategory": sr.raw_subcategory,
+            }
+            for sr in d.source_rows
+        ]
+        self.detail_classification_history = [
+            {
+                "transaction_type": cr.transaction_type,
+                "category_id": cr.category_id or "",
+                "category_name": (
+                    CATEGORY_MAP[cr.category_id].name
+                    if cr.category_id and cr.category_id in CATEGORY_MAP
+                    else ""
+                ),
+                "merchant": cr.merchant or "",
+                "source": cr.source,
+                "review_state": cr.review_state,
+                "rationale": cr.rationale or "",
+                "model_version": cr.model_version or "",
+                "rule_version": cr.rule_version or "",
+                "created_at": cr.created_at.strftime("%d.%m.%Y %H:%M"),
+            }
+            for cr in d.classification_history
+        ]
+        self.detail_transfer_links = [
+            {
+                "counterpart_date": (
+                    tl.counterpart_date.strftime("%d.%m.%Y") if tl.counterpart_date else ""
+                ),
+                "account_name": tl.account_name or "",
+                "display_amount": (
+                    _format_amount(tl.amount_cents) if tl.amount_cents is not None else ""
+                ),
+                "link_state": tl.link_state,
+            }
+            for tl in d.transfer_links
+        ]
+        self.detail_note = d.note or ""
+        self.detail_note_updated_at = (
+            d.note_updated_at.strftime("%d.%m.%Y %H:%M") if d.note_updated_at else ""
+        )
+        # Pre-fill edit form from the active classification values on the detail
+        self.edit_type = d.transaction_type or ""
+        self.edit_category_id = d.category_id or "__none__"
+        self.edit_merchant = d.merchant or ""
+        self.detail_save_error = ""
 
     @rx.event
     def open_detail(self, txn_id: str) -> None:
@@ -289,58 +361,7 @@ class TransactionsState(rx.State):
             if d is None:
                 self.detail_error = "Transaction not found"
                 return
-            self.detail_display_text = d.display_text or ""
-            self.detail_source_rows = [
-                {
-                    "batch_filename": sr.batch_filename,
-                    "import_date": sr.import_date.strftime("%d.%m.%Y") if sr.import_date else "",
-                    "row_number": str(sr.row_number),
-                    "raw_date": sr.raw_date,
-                    "raw_text": sr.raw_text,
-                    "raw_amount": sr.raw_amount,
-                    "raw_balance": sr.raw_balance or "",
-                    "raw_status": sr.raw_status,
-                    "raw_category": sr.raw_category,
-                    "raw_subcategory": sr.raw_subcategory,
-                }
-                for sr in d.source_rows
-            ]
-            self.detail_classification_history = [
-                {
-                    "transaction_type": cr.transaction_type,
-                    "category_id": cr.category_id or "",
-                    "category_name": (
-                        CATEGORY_MAP[cr.category_id].name
-                        if cr.category_id and cr.category_id in CATEGORY_MAP
-                        else ""
-                    ),
-                    "merchant": cr.merchant or "",
-                    "source": cr.source,
-                    "review_state": cr.review_state,
-                    "rationale": cr.rationale or "",
-                    "model_version": cr.model_version or "",
-                    "rule_version": cr.rule_version or "",
-                    "created_at": cr.created_at.strftime("%d.%m.%Y %H:%M"),
-                }
-                for cr in d.classification_history
-            ]
-            self.detail_transfer_links = [
-                {
-                    "counterpart_date": (
-                        tl.counterpart_date.strftime("%d.%m.%Y") if tl.counterpart_date else ""
-                    ),
-                    "account_name": tl.account_name or "",
-                    "display_amount": (
-                        _format_amount(tl.amount_cents) if tl.amount_cents is not None else ""
-                    ),
-                    "link_state": tl.link_state,
-                }
-                for tl in d.transfer_links
-            ]
-            self.detail_note = d.note or ""
-            self.detail_note_updated_at = (
-                d.note_updated_at.strftime("%d.%m.%Y %H:%M") if d.note_updated_at else ""
-            )
+            self._apply_detail(d)
         except Exception as exc:
             self.detail_error = str(exc)
         finally:
@@ -350,6 +371,55 @@ class TransactionsState(rx.State):
     def close_detail(self) -> None:
         self.selected_transaction_id = ""
         self._clear_detail()
+
+    @rx.event
+    def set_edit_type(self, val: str) -> None:
+        self.edit_type = val
+
+    @rx.event
+    def set_edit_category_id(self, val: str) -> None:
+        self.edit_category_id = val
+
+    @rx.event
+    def set_edit_merchant(self, val: str) -> None:
+        self.edit_merchant = val
+
+    @rx.event
+    def save_classification(self) -> None:
+        """Apply a manual classification override and refresh both the detail and the table row."""
+        if not self.selected_transaction_id:
+            return
+        if not self.edit_type:
+            self.detail_save_error = "Transaction type is required."
+            return
+        self.detail_save_error = ""
+        category_id = (
+            self.edit_category_id
+            if self.edit_category_id and self.edit_category_id != "__none__"
+            else None
+        )
+        merchant = self.edit_merchant.strip() or None
+        session = _get_session_factory()()
+        try:
+            classification_service.manual_override(
+                session=session,
+                transaction_id=self.selected_transaction_id,
+                transaction_type=self.edit_type,
+                category_id=category_id,
+                merchant=merchant,
+            )
+            session.commit()
+            # Reload detail so classification history shows the new entry
+            d = get_transaction_detail(session, self.selected_transaction_id)
+            if d is not None:
+                self._apply_detail(d)
+            # Refresh the table so the ledger row reflects the new classification
+            self._do_fetch()
+        except Exception as exc:
+            self.detail_save_error = str(exc)
+            session.rollback()
+        finally:
+            session.close()
 
     # ---- on-load events ----
 
@@ -791,6 +861,83 @@ def _transfer_link_item(tl: dict) -> rx.Component:
     )
 
 
+def _edit_classification_form() -> rx.Component:
+    """Inline form for applying a manual classification override."""
+    return rx.vstack(
+        rx.text("Edit Classification", weight="medium", size="2", margin_bottom="0.25em"),
+        rx.flex(
+            rx.vstack(
+                rx.text("Type", size="1", color_scheme="gray"),
+                rx.select.root(
+                    rx.select.trigger(data_testid="edit-type-select", size="2"),
+                    rx.select.content(
+                        *[rx.select.item(t, value=t) for t in _ALL_TYPES]
+                    ),
+                    value=TransactionsState.edit_type,
+                    on_change=TransactionsState.set_edit_type,
+                ),
+                align_items="start",
+                gap="0.25em",
+            ),
+            rx.vstack(
+                rx.text("Category", size="1", color_scheme="gray"),
+                rx.select.root(
+                    rx.select.trigger(data_testid="edit-category-select", size="2"),
+                    rx.select.content(
+                        rx.foreach(
+                            TransactionsState.categories,
+                            lambda cat: rx.select.item(cat["label"], value=cat["id"]),
+                        ),
+                    ),
+                    value=TransactionsState.edit_category_id,
+                    on_change=TransactionsState.set_edit_category_id,
+                ),
+                align_items="start",
+                gap="0.25em",
+            ),
+            rx.vstack(
+                rx.text("Merchant", size="1", color_scheme="gray"),
+                rx.input(
+                    value=TransactionsState.edit_merchant,
+                    on_change=TransactionsState.set_edit_merchant,
+                    placeholder="Merchant (optional)",
+                    data_testid="edit-merchant-input",
+                    size="2",
+                    width="200px",
+                ),
+                align_items="start",
+                gap="0.25em",
+            ),
+            gap="1em",
+            align="end",
+            wrap="wrap",
+        ),
+        rx.cond(
+            TransactionsState.detail_save_error != "",
+            rx.text(
+                TransactionsState.detail_save_error,
+                color="red",
+                size="2",
+                data_testid="edit-save-error",
+            ),
+            rx.fragment(),
+        ),
+        rx.button(
+            "Save",
+            on_click=TransactionsState.save_classification,
+            data_testid="edit-save-btn",
+            size="2",
+        ),
+        gap="0.5em",
+        align_items="start",
+        width="100%",
+        padding_top="1.25em",
+        border_top="1px solid var(--gray-4)",
+        margin_top="1.25em",
+        data_testid="edit-classification-form",
+    )
+
+
 def _detail_panel() -> rx.Component:
     return rx.box(
         rx.flex(
@@ -861,6 +1008,8 @@ def _detail_panel() -> rx.Component:
                 data_testid="detail-classification-history",
             ),
         ),
+        # Edit classification form
+        _edit_classification_form(),
         # Transfer links section
         rx.text(
             "Transfer links",
