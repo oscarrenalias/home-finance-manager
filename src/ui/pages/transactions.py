@@ -8,11 +8,12 @@ from urllib.parse import parse_qs
 
 import reflex as rx
 
-from config.categories import CATEGORIES
+from config.categories import CATEGORIES, CATEGORY_MAP
 from services.transaction_query import (
     LedgerFilters,
     LedgerRow,
     PAGE_SIZES,
+    get_transaction_detail,
     list_transactions,
 )
 from storage.database import _get_session_factory
@@ -106,6 +107,16 @@ class TransactionsState(rx.State):
     # ---- ui ----
     error_message: str = ""
 
+    # ---- detail panel ----
+    selected_transaction_id: str = ""
+    detail_display_text: str = ""
+    detail_source_rows: list[dict] = []
+    detail_classification_history: list[dict] = []
+    detail_transfer_links: list[dict] = []
+    detail_note: str = ""
+    detail_note_updated_at: str = ""
+    detail_error: str = ""
+
     # ---- computed vars ----
 
     @rx.var
@@ -133,6 +144,18 @@ class TransactionsState(rx.State):
     @rx.var
     def page_size_str(self) -> str:
         return str(self.page_size)
+
+    @rx.var
+    def has_source_rows(self) -> bool:
+        return len(self.detail_source_rows) > 0
+
+    @rx.var
+    def has_classification_history(self) -> bool:
+        return len(self.detail_classification_history) > 0
+
+    @rx.var
+    def has_transfer_links(self) -> bool:
+        return len(self.detail_transfer_links) > 0
 
     @rx.var
     def has_filters(self) -> bool:
@@ -239,6 +262,94 @@ class TransactionsState(rx.State):
             self.total_count = 0
         finally:
             session.close()
+
+    # ---- detail panel helpers ----
+
+    def _clear_detail(self) -> None:
+        self.detail_display_text = ""
+        self.detail_source_rows = []
+        self.detail_classification_history = []
+        self.detail_transfer_links = []
+        self.detail_note = ""
+        self.detail_note_updated_at = ""
+        self.detail_error = ""
+
+    @rx.event
+    def open_detail(self, txn_id: str) -> None:
+        """Open the detail panel for txn_id; clicking the same row again closes it."""
+        if self.selected_transaction_id == txn_id:
+            self.selected_transaction_id = ""
+            self._clear_detail()
+            return
+        self.selected_transaction_id = txn_id
+        self._clear_detail()
+        session = _get_session_factory()()
+        try:
+            d = get_transaction_detail(session, txn_id)
+            if d is None:
+                self.detail_error = "Transaction not found"
+                return
+            self.detail_display_text = d.display_text or ""
+            self.detail_source_rows = [
+                {
+                    "batch_filename": sr.batch_filename,
+                    "import_date": sr.import_date.strftime("%d.%m.%Y") if sr.import_date else "",
+                    "row_number": str(sr.row_number),
+                    "raw_date": sr.raw_date,
+                    "raw_text": sr.raw_text,
+                    "raw_amount": sr.raw_amount,
+                    "raw_balance": sr.raw_balance or "",
+                    "raw_status": sr.raw_status,
+                    "raw_category": sr.raw_category,
+                    "raw_subcategory": sr.raw_subcategory,
+                }
+                for sr in d.source_rows
+            ]
+            self.detail_classification_history = [
+                {
+                    "transaction_type": cr.transaction_type,
+                    "category_id": cr.category_id or "",
+                    "category_name": (
+                        CATEGORY_MAP[cr.category_id].name
+                        if cr.category_id and cr.category_id in CATEGORY_MAP
+                        else ""
+                    ),
+                    "merchant": cr.merchant or "",
+                    "source": cr.source,
+                    "review_state": cr.review_state,
+                    "rationale": cr.rationale or "",
+                    "model_version": cr.model_version or "",
+                    "rule_version": cr.rule_version or "",
+                    "created_at": cr.created_at.strftime("%d.%m.%Y %H:%M"),
+                }
+                for cr in d.classification_history
+            ]
+            self.detail_transfer_links = [
+                {
+                    "counterpart_date": (
+                        tl.counterpart_date.strftime("%d.%m.%Y") if tl.counterpart_date else ""
+                    ),
+                    "account_name": tl.account_name or "",
+                    "display_amount": (
+                        _format_amount(tl.amount_cents) if tl.amount_cents is not None else ""
+                    ),
+                    "link_state": tl.link_state,
+                }
+                for tl in d.transfer_links
+            ]
+            self.detail_note = d.note or ""
+            self.detail_note_updated_at = (
+                d.note_updated_at.strftime("%d.%m.%Y %H:%M") if d.note_updated_at else ""
+            )
+        except Exception as exc:
+            self.detail_error = str(exc)
+        finally:
+            session.close()
+
+    @rx.event
+    def close_detail(self) -> None:
+        self.selected_transaction_id = ""
+        self._clear_detail()
 
     # ---- on-load events ----
 
@@ -617,92 +728,271 @@ def _filter_bar() -> rx.Component:
     )
 
 
+def _detail_kv(label: str, val) -> rx.Component:
+    """Render a key-value row inside the detail panel."""
+    return rx.flex(
+        rx.text(label + ":", size="1", color_scheme="gray", width="130px", flex_shrink="0"),
+        rx.text(val, size="1"),
+        align="start",
+        gap="0.5em",
+        width="100%",
+    )
+
+
+def _source_row_item(sr: dict) -> rx.Component:
+    return rx.box(
+        _detail_kv("File", sr["batch_filename"]),
+        _detail_kv("Import date", sr["import_date"]),
+        _detail_kv("Row #", sr["row_number"]),
+        _detail_kv("Raw date", sr["raw_date"]),
+        _detail_kv("Description", sr["raw_text"]),
+        _detail_kv("Amount", sr["raw_amount"]),
+        _detail_kv("Balance", sr["raw_balance"]),
+        _detail_kv("Status", sr["raw_status"]),
+        _detail_kv("Bank category", sr["raw_category"]),
+        _detail_kv("Bank subcategory", sr["raw_subcategory"]),
+        padding="0.75em",
+        border="1px solid var(--gray-4)",
+        border_radius="0.4em",
+        data_testid="source-row-item",
+    )
+
+
+def _classification_history_item(ch: dict) -> rx.Component:
+    return rx.box(
+        _detail_kv("Type", ch["transaction_type"]),
+        _detail_kv("Category", ch["category_name"]),
+        _detail_kv("Merchant", ch["merchant"]),
+        _detail_kv("Source", ch["source"]),
+        _detail_kv("Review state", ch["review_state"]),
+        _detail_kv("Rationale", ch["rationale"]),
+        _detail_kv("Model version", ch["model_version"]),
+        _detail_kv("Rule version", ch["rule_version"]),
+        _detail_kv("Created", ch["created_at"]),
+        padding="0.75em",
+        border="1px solid var(--gray-4)",
+        border_radius="0.4em",
+        data_testid="classification-history-item",
+    )
+
+
+def _transfer_link_item(tl: dict) -> rx.Component:
+    return rx.flex(
+        rx.text(tl["counterpart_date"], size="2", color_scheme="gray", width="90px", flex_shrink="0"),
+        rx.text(tl["account_name"], size="2", flex="1"),
+        rx.text(tl["display_amount"], size="2", font_family="monospace", flex_shrink="0"),
+        rx.badge(tl["link_state"], size="1", variant="soft", color_scheme="blue", flex_shrink="0"),
+        align="center",
+        gap="1em",
+        padding="0.5em 0.75em",
+        border="1px solid var(--gray-4)",
+        border_radius="0.4em",
+        data_testid="transfer-link-item",
+    )
+
+
+def _detail_panel() -> rx.Component:
+    return rx.box(
+        rx.flex(
+            rx.text("Transaction Detail", weight="bold", size="3"),
+            rx.spacer(),
+            rx.button(
+                "Close",
+                variant="ghost",
+                size="1",
+                on_click=TransactionsState.close_detail,
+                data_testid="detail-close-btn",
+            ),
+            align="center",
+            margin_bottom="1em",
+        ),
+        rx.cond(
+            TransactionsState.detail_error != "",
+            rx.box(
+                rx.text(TransactionsState.detail_error, color="red", size="2"),
+                padding="0.5em",
+                border="1px solid var(--red-6)",
+                border_radius="0.4em",
+                margin_bottom="1em",
+                data_testid="detail-error-banner",
+            ),
+            rx.fragment(),
+        ),
+        # Source rows section
+        rx.text("Source rows", weight="medium", size="2", margin_bottom="0.5em"),
+        rx.cond(
+            TransactionsState.has_source_rows,
+            rx.vstack(
+                rx.foreach(TransactionsState.detail_source_rows, _source_row_item),
+                gap="0.5em",
+                width="100%",
+                data_testid="detail-source-rows",
+            ),
+            rx.text(
+                "No source rows.",
+                size="2",
+                color_scheme="gray",
+                data_testid="detail-source-rows",
+            ),
+        ),
+        # Classification history section
+        rx.text(
+            "Classification history",
+            weight="medium",
+            size="2",
+            margin_top="1.25em",
+            margin_bottom="0.5em",
+        ),
+        rx.cond(
+            TransactionsState.has_classification_history,
+            rx.vstack(
+                rx.foreach(
+                    TransactionsState.detail_classification_history,
+                    _classification_history_item,
+                ),
+                gap="0.5em",
+                width="100%",
+                data_testid="detail-classification-history",
+            ),
+            rx.text(
+                "No classification history.",
+                size="2",
+                color_scheme="gray",
+                data_testid="detail-classification-history",
+            ),
+        ),
+        # Transfer links section
+        rx.text(
+            "Transfer links",
+            weight="medium",
+            size="2",
+            margin_top="1.25em",
+            margin_bottom="0.5em",
+        ),
+        rx.cond(
+            TransactionsState.has_transfer_links,
+            rx.vstack(
+                rx.foreach(TransactionsState.detail_transfer_links, _transfer_link_item),
+                gap="0.5em",
+                width="100%",
+                data_testid="detail-transfer-links",
+            ),
+            rx.text(
+                "No transfer links.",
+                size="2",
+                color_scheme="gray",
+                data_testid="detail-transfer-links",
+            ),
+        ),
+        padding="1.25em",
+        border_top="2px solid var(--accent-6)",
+        background="var(--accent-2)",
+        data_testid="transaction-detail-panel",
+    )
+
+
 def _ledger_row(item: dict) -> rx.Component:
     is_negative = item["amount_cents"] < 0
-    return rx.flex(
-        rx.text(item["date"], size="2", color_scheme="gray", width="90px", flex_shrink="0"),
-        rx.text(item["account_name"], size="2", width="130px", flex_shrink="0", color_scheme="gray"),
-        rx.vstack(
+    is_selected = TransactionsState.selected_transaction_id == item["id"]
+    return rx.box(
+        rx.flex(
+            rx.text(item["date"], size="2", color_scheme="gray", width="90px", flex_shrink="0"),
+            rx.text(item["account_name"], size="2", width="130px", flex_shrink="0", color_scheme="gray"),
+            rx.vstack(
+                rx.text(
+                    item["display_text"],
+                    size="2",
+                    overflow="hidden",
+                    text_overflow="ellipsis",
+                    white_space="nowrap",
+                    max_width="280px",
+                ),
+                rx.cond(
+                    item["merchant"] != "",
+                    rx.text(item["merchant"], size="1", color_scheme="gray"),
+                    rx.fragment(),
+                ),
+                rx.cond(
+                    (item["status"] == "Rejected") | (item["status"] == "Deleted"),
+                    rx.badge(
+                        item["status"],
+                        color_scheme="red",
+                        variant="outline",
+                        size="1",
+                        data_testid="status-badge",
+                    ),
+                    rx.fragment(),
+                ),
+                gap="0",
+                align_items="start",
+                flex="1",
+                min_width="0",
+            ),
             rx.text(
-                item["display_text"],
-                size="2",
+                item["category_name"],
+                size="1",
+                color_scheme="gray",
+                width="140px",
+                flex_shrink="0",
                 overflow="hidden",
                 text_overflow="ellipsis",
                 white_space="nowrap",
-                max_width="280px",
             ),
-            rx.cond(
-                item["merchant"] != "",
-                rx.text(item["merchant"], size="1", color_scheme="gray"),
-                rx.fragment(),
-            ),
-            rx.cond(
-                (item["status"] == "Rejected") | (item["status"] == "Deleted"),
-                rx.badge(
-                    item["status"],
-                    color_scheme="red",
-                    variant="outline",
-                    size="1",
-                    data_testid="status-badge",
-                ),
-                rx.fragment(),
-            ),
-            gap="0",
-            align_items="start",
-            flex="1",
-            min_width="0",
-        ),
-        rx.text(
-            item["category_name"],
-            size="1",
-            color_scheme="gray",
-            width="140px",
-            flex_shrink="0",
-            overflow="hidden",
-            text_overflow="ellipsis",
-            white_space="nowrap",
-        ),
-        rx.badge(
-            item["transaction_type"],
-            color_scheme=item["type_color"],
-            variant="soft",
-            size="1",
-            width="110px",
-            flex_shrink="0",
-        ),
-        rx.cond(
-            item["review_state"] != "",
             rx.badge(
-                item["review_state"],
-                color_scheme=item["review_color"],
-                variant="outline",
+                item["transaction_type"],
+                color_scheme=item["type_color"],
+                variant="soft",
                 size="1",
-                width="90px",
+                width="110px",
                 flex_shrink="0",
             ),
-            rx.box(width="90px", flex_shrink="0"),
-        ),
-        rx.text(
-            item["display_amount"],
-            size="2",
-            font_family="monospace",
-            color=rx.cond(is_negative, "var(--red-11)", "inherit"),
-            text_align="right",
-            width="100px",
-            flex_shrink="0",
+            rx.cond(
+                item["review_state"] != "",
+                rx.badge(
+                    item["review_state"],
+                    color_scheme=item["review_color"],
+                    variant="outline",
+                    size="1",
+                    width="90px",
+                    flex_shrink="0",
+                ),
+                rx.box(width="90px", flex_shrink="0"),
+            ),
+            rx.text(
+                item["display_amount"],
+                size="2",
+                font_family="monospace",
+                color=rx.cond(is_negative, "var(--red-11)", "inherit"),
+                text_align="right",
+                width="100px",
+                flex_shrink="0",
+            ),
+            rx.cond(
+                item["has_note"],
+                rx.icon("notebook-text", size=14, color="var(--gray-8)", data_testid="note-indicator"),
+                rx.box(width="18px"),
+            ),
+            rx.cond(
+                is_selected,
+                rx.text("▾", size="2", color_scheme="gray", flex_shrink="0"),
+                rx.text("›", size="2", color_scheme="gray", flex_shrink="0"),
+            ),
+            align="center",
+            gap="0.75em",
+            padding="0.5em 1em",
+            width="100%",
+            cursor="pointer",
+            _hover={"background": "var(--accent-2)"},
+            on_click=TransactionsState.open_detail(item["id"]),
+            data_testid="ledger-row",
         ),
         rx.cond(
-            item["has_note"],
-            rx.icon("notebook-text", size=14, color="var(--gray-8)", data_testid="note-indicator"),
-            rx.box(width="18px"),
+            is_selected,
+            _detail_panel(),
+            rx.fragment(),
         ),
-        align="center",
-        gap="0.75em",
-        padding="0.5em 1em",
         border_bottom="1px solid var(--gray-3)",
         width="100%",
-        _hover={"background": "var(--accent-2)"},
-        data_testid="ledger-row",
     )
 
 
@@ -765,6 +1055,7 @@ def _table_header() -> rx.Component:
             flex_shrink="0",
         ),
         rx.box(width="18px"),
+        rx.box(width="16px"),
         align="center",
         gap="0.75em",
         padding="0.4em 1em",
