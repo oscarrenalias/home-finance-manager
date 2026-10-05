@@ -1,4 +1,4 @@
-"""Tests for _get_engine() connect_args guard and the PostgreSQL migration branch."""
+"""Tests for _get_engine() connect_args guard and Alembic migration correctness."""
 from __future__ import annotations
 
 import os
@@ -87,35 +87,29 @@ def test_engine_is_cached_across_calls():
     assert first is second
 
 
-# --- postgres migration branch tests ---
+# --- migration correctness tests ---
 
 
 @pytest.fixture()
 def fresh_sqlite_db():
-    """Yield a sqlite:// URL for a blank, unmigrated DB; clean up after test.
-
-    Also sets DATABASE_URL so alembic env.py picks up the correct target — env.py
-    reads DATABASE_URL and overwrites sqlalchemy.url on the Config object, so the
-    env var must match the temp DB path for migrations to land in the right file.
-    """
+    """Yield a sqlite:// URL for a blank, unmigrated DB; clean up after test."""
     fd, db_path = tempfile.mkstemp(suffix=".db")
     os.close(fd)
     db_url = f"sqlite:///{db_path}"
     os.environ["DATABASE_URL"] = db_url
     yield db_url
     Path(db_path).unlink(missing_ok=True)
-    # DATABASE_URL restoration is handled by the autouse isolated_engine teardown
 
 
-def test_postgres_branch_upgrade_creates_all_tables(fresh_sqlite_db):
-    """Applying postgres@head to a blank SQLite DB creates all 9 expected tables."""
-    command.upgrade(_make_alembic_cfg(fresh_sqlite_db), "postgres@head")
+def test_upgrade_head_creates_all_tables(fresh_sqlite_db):
+    """Applying upgrade head to a blank DB creates all 9 expected tables."""
+    command.upgrade(_make_alembic_cfg(fresh_sqlite_db), "head")
     assert POSTGRES_TABLES == _table_names(fresh_sqlite_db)
 
 
-def test_postgres_branch_downgrade_removes_all_tables(fresh_sqlite_db):
-    """Downgrading postgres@base after upgrade removes all tables."""
+def test_downgrade_base_removes_all_tables(fresh_sqlite_db):
+    """Downgrading to base after a full upgrade removes all tables."""
     cfg = _make_alembic_cfg(fresh_sqlite_db)
-    command.upgrade(cfg, "postgres@head")
-    command.downgrade(cfg, "postgres@base")
+    command.upgrade(cfg, "head")
+    command.downgrade(cfg, "base")
     assert _table_names(fresh_sqlite_db) == set()
