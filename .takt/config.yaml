@@ -4,7 +4,7 @@
 common:
   default_runner: claude
   templates_dir: templates/agents
-  test_command: pytest
+  test_command: uv run pytest
   test_timeout_seconds: 900
   commit_bead_state: false
   agent_types:
@@ -51,7 +51,7 @@ claude:
   skills_dir: .claude
   flags:
     - "--dangerously-skip-permissions"
-  timeout_seconds: 900
+  timeout_seconds: 1800
   model_default: claude-sonnet-4-6
   model_by_agent:
     developer: claude-sonnet-4-6
