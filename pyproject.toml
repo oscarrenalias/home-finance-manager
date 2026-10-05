@@ -33,13 +33,13 @@ dev = [
 
 [tool.hatch.build.targets.wheel]
 packages = [
-    {include = "ui", from = "src"},
-    {include = "domain", from = "src"},
-    {include = "services", from = "src"},
-    {include = "storage", from = "src"},
-    {include = "llm", from = "src"},
-    {include = "jobs", from = "src"},
-    {include = "config", from = "src"},
+    "src/ui",
+    "src/domain",
+    "src/services",
+    "src/storage",
+    "src/llm",
+    "src/jobs",
+    "src/config",
 ]
 
 [tool.pytest.ini_options]
