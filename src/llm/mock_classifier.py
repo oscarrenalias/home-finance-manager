@@ -48,6 +48,9 @@ class MockClassifier:
             rationale=_RATIONALE,
         )
 
+    def classify_many(self, requests: list[ClassificationRequest]) -> list[ClassificationResult]:
+        return [self.classify(r) for r in requests]
+
 
 # Verify protocol conformance at import time.
 _: AbstractClassifier = MockClassifier()

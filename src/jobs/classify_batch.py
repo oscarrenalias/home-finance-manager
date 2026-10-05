@@ -4,9 +4,9 @@ Idempotency (A11): transactions with an existing accepted Classification are ski
 the DB query level, so re-running or retrying this job never overwrites a manual override
 or a previously auto-accepted result.
 
-Commit strategy: all Classification and AuditEvent rows produced in a single job run are
-written in one session.commit() call at the end of the loop. This keeps the batch
-atomically consistent — either every classification lands or none do on failure.
+Commit strategy: results are written and committed after each chunk of CHUNK_SIZE
+transactions so progress is visible immediately and partial work is preserved if the
+worker crashes mid-batch.
 """
 
 from __future__ import annotations
@@ -27,9 +27,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# A16: auto-accept only low-risk suggestions. 0.80 matches the spec threshold — below this
-# the result is queued for human review regardless of transaction type.
 AUTO_ACCEPT_THRESHOLD = 0.80
+CHUNK_SIZE = 50
 
 _TRANSFER_TYPES = frozenset({"internal_transfer", "external_transfer", "contribution"})
 
@@ -43,7 +42,7 @@ def handle_classify_batch(
 
     Inputs schema: {"batch_id": "<uuid>"}
     Skips transactions with an existing accepted Classification (A11 idempotency).
-    Commits once at the end — all writes are part of a single transaction boundary.
+    Commits after each chunk of CHUNK_SIZE — progress is visible progressively.
     """
     if not job.inputs:
         raise ValueError(f"Job {job.id} has no inputs; expected {{batch_id: <uuid>}}")
@@ -55,7 +54,6 @@ def handle_classify_batch(
         for c in categories
     ]
 
-    # Exclude transactions that already have an accepted Classification at the DB level.
     accepted_ids_subq = (
         select(Classification.transaction_id)
         .where(Classification.review_state == "accepted")
@@ -74,53 +72,63 @@ def handle_classify_batch(
     )
 
     logger.info(
-        "classify_batch: batch=%s eligible_transactions=%d",
-        batch_id,
-        len(transactions),
+        "classify_batch: batch=%s eligible_transactions=%d chunk_size=%d",
+        batch_id, len(transactions), CHUNK_SIZE,
     )
 
-    for txn in transactions:
-        request = ClassificationRequest(
-            transaction_id=txn.id,
-            display_text=txn.display_text,
-            amount_cents=txn.amount_cents,
-            date=txn.date.isoformat(),
-            account_role=txn.account.role,
-            categories=category_dicts,
+    for chunk_start in range(0, len(transactions), CHUNK_SIZE):
+        chunk = transactions[chunk_start: chunk_start + CHUNK_SIZE]
+
+        requests = [
+            ClassificationRequest(
+                transaction_id=txn.id,
+                display_text=txn.display_text,
+                amount_cents=txn.amount_cents,
+                date=txn.date.isoformat(),
+                account_role=txn.account.role,
+                categories=category_dicts,
+            )
+            for txn in chunk
+        ]
+
+        results = classifier.classify_many(requests)
+
+        for txn, result in zip(chunk, results):
+            is_transfer = result.transaction_type in _TRANSFER_TYPES
+            review_state = (
+                "needs_review"
+                if is_transfer or result.confidence < AUTO_ACCEPT_THRESHOLD
+                else "accepted"
+            )
+
+            classification = apply_classification(
+                session=session,
+                transaction_id=txn.id,
+                source="llm",
+                transaction_type=result.transaction_type,
+                category_id=result.category_id,
+                merchant=result.merchant,
+                rationale=result.rationale,
+            )
+            classification.review_state = review_state
+
+            if review_state == "accepted":
+                session.add(AuditEvent(
+                    entity_type="classification",
+                    entity_id=classification.id,
+                    action="auto_accepted",
+                    actor="llm",
+                    before_state=None,
+                    after_state={
+                        "transaction_id": txn.id,
+                        "transaction_type": result.transaction_type,
+                        "confidence": result.confidence,
+                        "review_state": "accepted",
+                    },
+                ))
+
+        session.commit()
+        logger.info(
+            "classify_batch: committed chunk %d-%d of %d",
+            chunk_start + 1, chunk_start + len(chunk), len(transactions),
         )
-
-        result = classifier.classify(request)
-
-        is_transfer = result.transaction_type in _TRANSFER_TYPES
-        if is_transfer or result.confidence < AUTO_ACCEPT_THRESHOLD:
-            review_state = "needs_review"
-        else:
-            review_state = "accepted"
-
-        classification = apply_classification(
-            session=session,
-            transaction_id=txn.id,
-            source="llm",
-            transaction_type=result.transaction_type,
-            category_id=result.category_id,
-            merchant=result.merchant,
-            rationale=result.rationale,
-        )
-        classification.review_state = review_state
-
-        if review_state == "accepted":
-            session.add(AuditEvent(
-                entity_type="classification",
-                entity_id=classification.id,
-                action="auto_accepted",
-                actor="llm",
-                before_state=None,
-                after_state={
-                    "transaction_id": txn.id,
-                    "transaction_type": result.transaction_type,
-                    "confidence": result.confidence,
-                    "review_state": "accepted",
-                },
-            ))
-
-    session.commit()

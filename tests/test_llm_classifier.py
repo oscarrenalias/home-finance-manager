@@ -42,13 +42,19 @@ def _make_result(transaction_type: str, category_id: str | None, confidence: flo
 
 
 def _classify_with_mock(monkeypatch, request, mock_result):
-    """Run classify() with env vars set and LangChain chain mocked."""
+    """Run classify() with env vars set and LangChain chain mocked.
+
+    classify() delegates to classify_many(), which uses BatchClassificationResult,
+    so the chain mock must return BatchClassificationResult(results=[mock_result]).
+    """
     monkeypatch.setenv("LITELLM_BASE_URL", "http://localhost:4000")
     monkeypatch.setenv("LITELLM_MASTER_KEY", "sk-test")
 
+    from llm.classifier import BatchClassificationResult
+
     with patch("langchain_openai.ChatOpenAI") as mock_chat:
         chain_mock = MagicMock()
-        chain_mock.invoke.return_value = mock_result
+        chain_mock.invoke.return_value = BatchClassificationResult(results=[mock_result])
         mock_chat.return_value.with_structured_output.return_value = chain_mock
 
         from llm.classifier import LiteLLMClassifier
@@ -132,6 +138,9 @@ class TestAbstractClassifierProtocol:
             def classify(self, request: ClassificationRequest) -> ClassificationResult:
                 return ClassificationResult(transaction_type="unknown", confidence=0.0)
 
+            def classify_many(self, requests: list[ClassificationRequest]) -> list[ClassificationResult]:
+                return [self.classify(r) for r in requests]
+
         assert isinstance(_Stub(), AbstractClassifier)
 
     def test_class_missing_classify_does_not_satisfy_protocol(self):
@@ -148,6 +157,9 @@ class TestAbstractClassifierProtocol:
         class _WrongArity:
             def classify(self) -> None:  # missing request parameter
                 pass
+
+            def classify_many(self, requests) -> list:
+                return []
 
         # runtime_checkable only checks method presence, not signature;
         # but a no-arg classify() still has the attribute name → passes the
