@@ -1,7 +1,7 @@
 ---
 id: spec-09
 title: LLM Auto-Classification
-status: planned
+status: done
 ---
 
 ## Purpose
