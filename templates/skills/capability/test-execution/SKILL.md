@@ -52,6 +52,24 @@ Before running anything:
 - If a failure occurs in setup shared by multiple tests, it can justify one additional adjacent module, but do not expand to package-wide discovery.
 - If no automated test exists for the behavior, add the smallest relevant test and then run only that module.
 
+## UI / browser tests (project-specific)
+
+Applies whenever the bead touches `src/ui/pages/` or `src/ui/components/`.
+
+**Running**
+- Command: `uv run pytest tests/ui/test_<page>.py`. Run it synchronously; it typically takes 20–60 s.
+- `tests/ui/conftest.py` starts its own Reflex server against a temporary SQLite DB, and launches system Google Chrome (`channel="chrome"`). No dev server or `playwright install` is needed.
+- If the server never becomes ready, the failure message includes the tail of the Reflex log. A Python traceback there (e.g. "does not take in an `on_change` event trigger") means the page fails to compile. That is a product defect: report it, and set `needs_changes`.
+- Quick compile check before the browser run: `PYTHONPATH=src uv run python -c "from ui.pages.<page> import <page_fn>; <page_fn>()"`.
+
+**Writing**
+- One golden-path test, plus at least one edge case (empty state, invalid input, no results) per affected page.
+- Locate elements only by `data-testid`. Add missing `data-testid` attributes to the page component as minimal test enablement. To pick one row among many, use `get_by_test_id("ledger-row").filter(has_text=<unique tag>)`. Never use CSS classes, `nth-child`, `get_by_role`/`get_by_text` on their own, or XPath.
+- Assert outcomes, not just visibility: after an action, check the row/state/URL changed, and that non-matching rows are absent.
+- No conditional assertions (`if element.is_visible(): expect(...)`). They pass without testing anything. Make the state deterministic instead.
+- The app DB is shared for the whole test session. Seed rows with a unique tag per test (`uuid4().hex`), and filter by it. A test that needs an empty state must clear the tables it depends on first.
+- Use `expect(...)` with timeouts, not `time.sleep` or bare `assert locator.is_visible()`.
+
 ## Result Reporting
 
 Summaries should be concrete and reproducible:

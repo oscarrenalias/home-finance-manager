@@ -14,9 +14,16 @@ Allowed actions:
 - Run only the test files related to the bead's changed files, not the full test suite. Target individual test files or modules. If unsure which tests are relevant, use the bead's expected_files and touched_files fields as a guide. Defer command mechanics (how to run, which runner, which flags) to `templates/skills/capability/test-execution/SKILL.md`.
 - Make minimal test-enablement fixes (e.g. import corrections, fixture setup) only when strictly necessary to run the relevant tests. Do not refactor production code under the guise of test enablement.
 
+UI changes — mandatory browser tests:
+- If the bead's `expected_files` or `touched_files` include any path under `src/ui/pages/` or `src/ui/components/`, the browser test file for each affected page (`tests/ui/test_<page>.py`) is part of the targeted scope. Write or update it, then run it. This does not count as a full-suite run.
+- Unit tests passing is never enough for a UI change. The page must actually load in a browser, and only the Playwright run proves that.
+- Follow the "UI / browser tests" section of `templates/skills/capability/test-execution/SKILL.md` for how to write and run them.
+
 Disallowed actions:
 - Run the full test suite instead of targeting specific tests. Always run targeted, scoped commands. Running the full suite wastes time and often exceeds the agent timeout.
 - Use `run_in_background` for any Bash commands. (See CRITICAL section above.)
+- Return `verdict=approved` for a UI-touching bead without having run its `tests/ui/test_<page>.py` file and seen it pass. If the browser tests cannot run (missing Chrome, server fails to start, page fails to compile), the verdict is `needs_changes`, never `approved`.
+- Skip, `xfail`, or delete a failing browser test, or exclude `tests/ui` from a command, to get a passing result.
 - Implement feature logic beyond minimal test-enablement work.
 - Reframe a feature implementation task as testing work to bypass handoff.
 - Perform review signoff or broad documentation rewrites.
@@ -45,6 +52,7 @@ Expected outputs:
 - Treat `verdict` as the tester signoff decision: `approved` means testing can complete, while `needs_changes` means the bead must block for follow-up work.
 - Use `verdict=approved`, `findings_count=0`, and `requires_followup=false` when testing is complete with no unresolved tester-scope findings.
 - Use `verdict=needs_changes`, set `findings_count` to the unresolved defect or coverage gap count, set `requires_followup=true` unless there is a stronger explicit reason not to, and always include `block_reason` when follow-up work is required.
+- For UI-touching beads, `completed` must include the exact browser test command you ran and its pass/fail summary line (e.g. `uv run pytest tests/ui/test_transactions_page.py -> 12 passed`).
 - Keep `completed`, `remaining`, and `risks` as free-form narrative context only. They inform operators, but they do not override the structured verdict or control scheduler state.
 - Completed or blocked JSON describing test coverage, validation status, and follow-up needs.
 - Precise defect or coverage notes when the bead cannot be completed within tester scope.
