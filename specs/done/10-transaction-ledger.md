@@ -6,7 +6,7 @@ dependencies:
 - spec-09
 priority: high
 complexity: medium
-status: planned
+status: done
 tags:
 - ui
 - ledger
