@@ -19,6 +19,7 @@ interference.
 from __future__ import annotations
 
 import datetime
+import re
 import uuid
 
 import sqlalchemy as sa
@@ -37,6 +38,34 @@ _NAV_TIMEOUT_MS = 30_000
 
 def _engine(db_url: str):
     return sa.create_engine(db_url, connect_args={"check_same_thread": False})
+
+
+def _clear_ledger(db_url: str) -> None:
+    """Delete all ledger rows (children first) from the shared session test DB."""
+    engine = _engine(db_url)
+    try:
+        with engine.begin() as conn:
+            for table in ("transfer_links", "classifications", "source_observations", "transactions"):
+                conn.execute(sa.text(f"DELETE FROM {table}"))
+    finally:
+        engine.dispose()
+
+
+def _current_classification(db_url: str, tx_id: str) -> tuple[str, str, str] | None:
+    """Return (transaction_type, source, review_state) of the newest classification row."""
+    engine = _engine(db_url)
+    try:
+        with engine.connect() as conn:
+            row = conn.execute(
+                sa.text(
+                    "SELECT transaction_type, source, review_state FROM classifications "
+                    "WHERE transaction_id = :tx ORDER BY created_at DESC LIMIT 1"
+                ),
+                {"tx": tx_id},
+            ).first()
+        return tuple(row) if row else None
+    finally:
+        engine.dispose()
 
 
 def _seed_tx(
@@ -115,28 +144,20 @@ def _add_classification(
 # ---------------------------------------------------------------------------
 
 
-def test_empty_ledger_shows_import_link(page: Page, app_server: str) -> None:
+def test_empty_ledger_shows_import_link(page: Page, app_server: str, app_db_url: str) -> None:
     """AC-12: empty ledger state appears with a link to /import when no transactions exist."""
-    page.goto(f"{app_server}/transactions", wait_until="networkidle")
-    # The empty state may or may not be shown depending on whether other tests seeded data;
-    # only assert when the count element or empty state is visible.
-    empty = page.get_by_test_id("ledger-empty-state")
-    total_count_el = page.get_by_test_id("ledger-total-count")
+    # The app DB is shared across the session; other tests seed their own rows per test,
+    # so clearing the ledger here makes the empty state deterministic.
+    _clear_ledger(app_db_url)
 
-    # If the DB has transactions from other tests, we can still verify the empty-state structure
-    # by checking it exists in the DOM (Reflex conditionally renders via cond).
-    # When there are zero rows, it must be visible and must contain the import link.
-    total_el = page.locator("[data-testid='ledger-total-count']")
-    try:
-        total_el.wait_for(state="visible", timeout=_INTERACT_TIMEOUT_MS)
-        count_text = total_el.first.inner_text()
-        if "0" in count_text or count_text.strip() == "":
-            expect(empty).to_be_visible()
-            expect(page.get_by_role("link", name="Go to Import")).to_be_visible()
-    except Exception:
-        # Empty state is visible without count element
-        if empty.is_visible():
-            expect(page.get_by_role("link", name="Go to Import")).to_be_visible()
+    page.goto(f"{app_server}/transactions", wait_until="networkidle")
+    empty = page.get_by_test_id("ledger-empty-state")
+    expect(empty).to_be_visible(timeout=_NAV_TIMEOUT_MS)
+    expect(empty).to_contain_text("No transactions yet")
+    import_link = page.get_by_test_id("empty-state-import-link")
+    expect(import_link).to_be_visible()
+    expect(import_link).to_have_attribute("href", re.compile(r"/import$"))
+    expect(page.get_by_test_id("ledger-row")).to_have_count(0)
 
 
 # ---------------------------------------------------------------------------
@@ -149,61 +170,76 @@ def test_url_params_preapply_type_filter(
 ) -> None:
     """AC-6: /transactions?type=expense pre-applies the expense type filter."""
     # Seed an expense transaction that will show when type=expense filter is applied.
-    tag = f"ac6-expense-{uuid.uuid4().hex[:8]}"
+    run = uuid.uuid4().hex[:8]
+    tag = f"ac6-expense-{run}"
+    other = f"ac6-income-{run}"
     tx_id = _seed_tx(app_db_url, display_text=tag, amount_cents=-500)
     _add_classification(app_db_url, tx_id, transaction_type="expense", category_id=None)
+    other_id = _seed_tx(app_db_url, display_text=other, amount_cents=900)
+    _add_classification(app_db_url, other_id, transaction_type="income", category_id=None)
 
-    page.goto(f"{app_server}/transactions?type=expense", wait_until="networkidle")
-    # Wait for filter bar to be visible (app has loaded)
+    page.goto(f"{app_server}/transactions?type=expense&search=ac6-", wait_until="networkidle")
     expect(page.get_by_test_id("filter-bar")).to_be_visible(timeout=_NAV_TIMEOUT_MS)
-    # The filter-types checkbox group should reflect the pre-applied filter.
-    # The row with our tag should be visible.
-    expect(page.get_by_text(tag)).to_be_visible(timeout=_INTERACT_TIMEOUT_MS)
+    rows = page.get_by_test_id("ledger-row")
+    expect(rows.filter(has_text=tag)).to_have_count(1, timeout=_INTERACT_TIMEOUT_MS)
+    expect(rows.filter(has_text=other)).to_have_count(0)
+    expect(page.get_by_test_id("filter-type-expense")).to_have_attribute("data-state", "checked")
 
 
 def test_url_params_preapply_type_and_category(
     page: Page, app_server: str, app_db_url: str
 ) -> None:
     """AC-6: /transactions?type=expense&category=groceries pre-applies both filters."""
-    tag = f"ac6-both-{uuid.uuid4().hex[:8]}"
+    run = uuid.uuid4().hex[:8]
+    tag = f"ac6-both-{run}"
+    other = f"ac6-other-cat-{run}"
     tx_id = _seed_tx(app_db_url, display_text=tag, amount_cents=-300)
     _add_classification(
         app_db_url, tx_id, transaction_type="expense", category_id="groceries"
     )
+    other_id = _seed_tx(app_db_url, display_text=other, amount_cents=-300)
+    _add_classification(app_db_url, other_id, transaction_type="expense", category_id=None)
 
     page.goto(
-        f"{app_server}/transactions?type=expense&category=groceries",
+        f"{app_server}/transactions?type=expense&category=groceries&search={run}",
         wait_until="networkidle",
     )
     expect(page.get_by_test_id("filter-bar")).to_be_visible(timeout=_NAV_TIMEOUT_MS)
-    expect(page.get_by_text(tag)).to_be_visible(timeout=_INTERACT_TIMEOUT_MS)
+    rows = page.get_by_test_id("ledger-row")
+    expect(rows.filter(has_text=tag)).to_have_count(1, timeout=_INTERACT_TIMEOUT_MS)
+    expect(rows.filter(has_text=other)).to_have_count(0)
 
 
 def test_filter_change_updates_url(
     page: Page, app_server: str, app_db_url: str
 ) -> None:
     """AC-6: changing a filter updates the browser URL query string."""
-    tag = f"ac6-urlchange-{uuid.uuid4().hex[:8]}"
-    tx_id = _seed_tx(app_db_url, display_text=tag, amount_cents=-200)
-    _add_classification(app_db_url, tx_id, transaction_type="income", category_id=None)
+    run = uuid.uuid4().hex[:8]
+    income_tag = f"ac6-urlchange-income-{run}"
+    expense_tag = f"ac6-urlchange-expense-{run}"
+    income_id = _seed_tx(app_db_url, display_text=income_tag, amount_cents=200)
+    _add_classification(app_db_url, income_id, transaction_type="income", category_id=None)
+    expense_id = _seed_tx(app_db_url, display_text=expense_tag, amount_cents=-200)
+    _add_classification(app_db_url, expense_id, transaction_type="expense", category_id=None)
 
-    page.goto(f"{app_server}/transactions", wait_until="networkidle")
+    page.goto(f"{app_server}/transactions?search={run}", wait_until="networkidle")
     expect(page.get_by_test_id("filter-bar")).to_be_visible(timeout=_NAV_TIMEOUT_MS)
+    rows = page.get_by_test_id("ledger-row")
+    expect(rows).to_have_count(2, timeout=_INTERACT_TIMEOUT_MS)
 
-    initial_url = page.url
-
-    # Click the "income" type checkbox to apply the filter
+    # Tick "income": only the income row remains and the URL carries the filter.
     income_cb = page.get_by_test_id("filter-type-income")
-    income_cb.wait_for(state="visible", timeout=_INTERACT_TIMEOUT_MS)
     income_cb.click()
+    expect(income_cb).to_have_attribute("data-state", "checked", timeout=_INTERACT_TIMEOUT_MS)
+    expect(page).to_have_url(re.compile(r"[?&]type=income(&|$)"), timeout=_INTERACT_TIMEOUT_MS)
+    expect(rows.filter(has_text=income_tag)).to_have_count(1)
+    expect(rows.filter(has_text=expense_tag)).to_have_count(0)
 
-    # URL should now include type=income
-    page.wait_for_function(
-        "() => window.location.search.includes('type')",
-        timeout=_INTERACT_TIMEOUT_MS,
-    )
-    assert "type" in page.url, f"Expected 'type' in URL, got {page.url!r}"
-    assert page.url != initial_url
+    # Untick it: both rows return and the filter leaves the URL.
+    income_cb.click()
+    expect(income_cb).to_have_attribute("data-state", "unchecked", timeout=_INTERACT_TIMEOUT_MS)
+    expect(page).not_to_have_url(re.compile(r"type="), timeout=_INTERACT_TIMEOUT_MS)
+    expect(rows).to_have_count(2, timeout=_INTERACT_TIMEOUT_MS)
 
 
 # ---------------------------------------------------------------------------
@@ -250,24 +286,21 @@ def test_no_match_state_shows_clear_filters(
 ) -> None:
     """AC-12: applying a filter that matches nothing shows the no-filter-match state
     with a Clear filters button."""
-    # Navigate with a type filter that has no matching transactions (rejected)
-    # by using a very specific type filter combination unlikely to match.
+    # A unique search term guarantees no match regardless of rows other tests seeded.
+    no_match = f"no-match-{uuid.uuid4().hex}"
     page.goto(
-        f"{app_server}/transactions?type=external_transfer",
+        f"{app_server}/transactions?search={no_match}",
         wait_until="networkidle",
     )
     expect(page.get_by_test_id("filter-bar")).to_be_visible(timeout=_NAV_TIMEOUT_MS)
 
     empty_state = page.get_by_test_id("ledger-empty-state")
+    expect(empty_state).to_be_visible(timeout=_INTERACT_TIMEOUT_MS)
+    expect(empty_state).to_contain_text("No transactions match these filters")
 
-    # If empty state is visible, it should show Clear filters (not the import link)
-    if empty_state.is_visible():
-        expect(page.get_by_text("No transactions match these filters")).to_be_visible(
-            timeout=_INTERACT_TIMEOUT_MS
-        )
-        expect(page.get_by_role("button", name="Clear filters")).to_be_visible(
-            timeout=_INTERACT_TIMEOUT_MS
-        )
+    page.get_by_test_id("empty-state-clear").click()
+    expect(page.get_by_test_id("filter-search")).to_have_value("", timeout=_INTERACT_TIMEOUT_MS)
+    expect(page).not_to_have_url(re.compile(r"search="), timeout=_INTERACT_TIMEOUT_MS)
 
 
 # ---------------------------------------------------------------------------
@@ -345,20 +378,16 @@ def test_detail_panel_edit_classification_golden_path(
     type_select = page.get_by_test_id("edit-type-select")
     expect(type_select).to_be_visible(timeout=_INTERACT_TIMEOUT_MS)
     type_select.click()
-    page.get_by_role("option", name="income").click()
+    page.get_by_test_id("edit-type-option-income").click()
 
-    # Save
     save_btn = page.get_by_test_id("edit-save-btn")
     expect(save_btn).to_be_enabled(timeout=_INTERACT_TIMEOUT_MS)
     save_btn.click()
 
-    # Panel closes or refreshes; wait for it to settle
-    page.wait_for_load_state("networkidle", timeout=_NAV_TIMEOUT_MS)
-
-    # The ledger row should now show "income" type (re-open panel to verify)
-    # Or check that no error banner appeared
-    error_banner = page.get_by_test_id("ledger-error-banner")
-    assert not error_banner.is_visible(), "Error banner appeared after classification save"
+    # AC-12: the row updates in place, and the edit is stored as a manual override (A11).
+    expect(row.get_by_test_id("ledger-row-type")).to_have_text("income", timeout=_INTERACT_TIMEOUT_MS)
+    expect(page.get_by_test_id("ledger-error-banner")).to_have_count(0)
+    assert _current_classification(app_db_url, tx_id) == ("income", "manual", "accepted")
 
 
 def test_detail_panel_all_sections_visible(

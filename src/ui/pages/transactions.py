@@ -80,6 +80,7 @@ def _row_to_dict(row: LedgerRow) -> dict:
         "review_color": _REVIEW_STATE_COLORS.get(review_state, "gray"),
         "amount_cents": row.amount_cents,
         "display_amount": _format_amount(row.amount_cents),
+        "is_negative": row.amount_cents < 0,
         "status": row.status,
         "has_note": row.has_note,
     }
@@ -538,30 +539,38 @@ class TransactionsState(rx.State):
         self._do_fetch()
         yield self._push_url()
 
+    # Multi-select filters are lists of individual checkboxes: Radix CheckboxGroup
+    # exposes no on_change in Reflex 0.9, so each checkbox toggles its own value.
+    @staticmethod
+    def _toggled(values: list[str], value: str, checked: bool) -> list[str]:
+        if checked:
+            return values if value in values else [*values, value]
+        return [v for v in values if v != value]
+
     @rx.event
-    def set_filter_account_ids(self, val: list[str]):
-        self.filter_account_ids = val
+    def toggle_filter_account(self, value: str, checked: bool):
+        self.filter_account_ids = self._toggled(self.filter_account_ids, value, checked)
         self.current_page = 0
         self._do_fetch()
         yield self._push_url()
 
     @rx.event
-    def set_filter_types(self, val: list[str]):
-        self.filter_types = val
+    def toggle_filter_type(self, value: str, checked: bool):
+        self.filter_types = self._toggled(self.filter_types, value, checked)
         self.current_page = 0
         self._do_fetch()
         yield self._push_url()
 
     @rx.event
-    def set_filter_category_ids(self, val: list[str]):
-        self.filter_category_ids = val
+    def toggle_filter_category(self, value: str, checked: bool):
+        self.filter_category_ids = self._toggled(self.filter_category_ids, value, checked)
         self.current_page = 0
         self._do_fetch()
         yield self._push_url()
 
     @rx.event
-    def set_filter_review_states(self, val: list[str]):
-        self.filter_review_states = val
+    def toggle_filter_review_state(self, value: str, checked: bool):
+        self.filter_review_states = self._toggled(self.filter_review_states, value, checked)
         self.current_page = 0
         self._do_fetch()
         yield self._push_url()
@@ -690,17 +699,30 @@ def _search_input() -> rx.Component:
     )
 
 
+def _filter_checkbox(label, value, selected, handler, testid=None) -> rx.Component:
+    """One option in a multi-select filter; `selected` is the state list var."""
+    return rx.checkbox(
+        label,
+        checked=selected.contains(value),
+        on_change=lambda checked: handler(value, checked),
+        data_testid=testid,
+        size="2",
+    )
+
+
 def _type_filter() -> rx.Component:
     return rx.vstack(
         _filter_label("Type"),
         rx.box(
-            rx.checkbox_group.root(
+            rx.vstack(
                 *[
-                    rx.checkbox_group.item(t, value=t, data_testid=f"filter-type-{t}")
+                    _filter_checkbox(
+                        t, t, TransactionsState.filter_types,
+                        TransactionsState.toggle_filter_type, f"filter-type-{t}",
+                    )
                     for t in _ALL_TYPES
                 ],
-                value=TransactionsState.filter_types,
-                on_change=TransactionsState.set_filter_types,
+                gap="0.35em",
                 data_testid="filter-types",
             ),
             max_height="160px",
@@ -719,16 +741,15 @@ def _account_filter() -> rx.Component:
     return rx.vstack(
         _filter_label("Account"),
         rx.box(
-            rx.checkbox_group.root(
+            rx.vstack(
                 rx.foreach(
                     TransactionsState.accounts,
-                    lambda acct: rx.checkbox_group.item(
-                        acct["label"],
-                        value=acct["id"],
+                    lambda acct: _filter_checkbox(
+                        acct["label"], acct["id"], TransactionsState.filter_account_ids,
+                        TransactionsState.toggle_filter_account,
                     ),
                 ),
-                value=TransactionsState.filter_account_ids,
-                on_change=TransactionsState.set_filter_account_ids,
+                gap="0.35em",
                 data_testid="filter-accounts",
             ),
             max_height="160px",
@@ -747,16 +768,15 @@ def _category_filter() -> rx.Component:
     return rx.vstack(
         _filter_label("Category"),
         rx.box(
-            rx.checkbox_group.root(
+            rx.vstack(
                 rx.foreach(
                     TransactionsState.categories,
-                    lambda cat: rx.checkbox_group.item(
-                        cat["label"],
-                        value=cat["id"],
+                    lambda cat: _filter_checkbox(
+                        cat["label"], cat["id"], TransactionsState.filter_category_ids,
+                        TransactionsState.toggle_filter_category,
                     ),
                 ),
-                value=TransactionsState.filter_category_ids,
-                on_change=TransactionsState.set_filter_category_ids,
+                gap="0.35em",
                 data_testid="filter-categories",
             ),
             max_height="200px",
@@ -775,17 +795,16 @@ def _review_status_filter() -> rx.Component:
     return rx.vstack(
         _filter_label("Review status"),
         rx.box(
-            rx.checkbox_group.root(
+            rx.vstack(
                 *[
-                    rx.checkbox_group.item(
-                        opt["label"],
-                        value=opt["id"],
-                        data_testid=f"filter-review-{opt['id']}",
+                    _filter_checkbox(
+                        opt["label"], opt["id"], TransactionsState.filter_review_states,
+                        TransactionsState.toggle_filter_review_state,
+                        f"filter-review-{opt['id']}",
                     )
                     for opt in _REVIEW_STATE_OPTIONS
                 ],
-                value=TransactionsState.filter_review_states,
-                on_change=TransactionsState.set_filter_review_states,
+                gap="0.35em",
                 data_testid="filter-review-states",
             ),
             border="1px solid var(--gray-4)",
@@ -938,7 +957,10 @@ def _edit_classification_form() -> rx.Component:
                 rx.select.root(
                     rx.select.trigger(data_testid="edit-type-select", size="2"),
                     rx.select.content(
-                        *[rx.select.item(t, value=t) for t in _ALL_TYPES]
+                        *[
+                            rx.select.item(t, value=t, data_testid=f"edit-type-option-{t}")
+                            for t in _ALL_TYPES
+                        ]
                     ),
                     value=TransactionsState.edit_type,
                     on_change=TransactionsState.set_edit_type,
@@ -1189,7 +1211,7 @@ def _detail_panel() -> rx.Component:
 
 
 def _ledger_row(item: dict) -> rx.Component:
-    is_negative = item["amount_cents"] < 0
+    is_negative = item["is_negative"]
     is_selected = TransactionsState.selected_transaction_id == item["id"]
     return rx.box(
         rx.flex(
@@ -1242,6 +1264,7 @@ def _ledger_row(item: dict) -> rx.Component:
                 size="1",
                 width="110px",
                 flex_shrink="0",
+                data_testid="ledger-row-type",
             ),
             rx.cond(
                 item["review_state"] != "",
@@ -1430,6 +1453,7 @@ def _empty_state() -> rx.Component:
                         color_scheme="gray",
                         size="2",
                         on_click=TransactionsState.clear_filters,
+                        data_testid="empty-state-clear",
                     ),
                     align="center",
                     gap="0.75em",
@@ -1440,7 +1464,10 @@ def _empty_state() -> rx.Component:
                         size="3",
                         color_scheme="gray",
                     ),
-                    rx.link("Go to Import", href="/import", size="2"),
+                    rx.link(
+                        "Go to Import", href="/import", size="2",
+                        data_testid="empty-state-import-link",
+                    ),
                     align="center",
                     gap="0.5em",
                 ),

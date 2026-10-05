@@ -60,7 +60,7 @@ Domain modules must be importable without Reflex. Never keep an open SQLAlchemy 
 - `LedgerFilters` — frozen dataclass encoding all filter dimensions (date range, account, type, category, review state, free-text search, include-rejected flag).
 - `list_transactions(session, filters, sort, page, page_size) → LedgerPage` — paginated, filtered, sorted query; all filtering is in SQL via bound parameters (no full-table loads). `page_size` must be one of `PAGE_SIZES = (20, 50, 100)`.
 - `get_transaction_detail(session, transaction_id) → TransactionDetail | None` — full detail including source observations, classification history, transfer links, and note.
-- `get_current_classification(session, transaction_id) → Classification | None` — shared helper that returns the most-recent non-rejected Classification row; used by both the ledger and the Review page so they always agree on the active classification.
+- `get_current_classification(session, transaction_id) → Classification | None` — shared helper that returns the active Classification: the accepted row if one exists, otherwise the newest non-rejected row (so a manual override beats a later model rerun, A11). Used by both the ledger and the Review page so they always agree.
 - `set_note(session, transaction_id, note) → None` — set or clear a transaction note. Strips whitespace, stores NULL for empty, raises `ValueError` for notes exceeding 2000 characters or when the transaction is not found.
 
 **Note field constraints:**
