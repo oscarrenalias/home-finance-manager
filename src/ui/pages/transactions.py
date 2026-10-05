@@ -1,7 +1,10 @@
 """Transactions page — browsable ledger with filters."""
 from __future__ import annotations
 
+import json
+import urllib.parse
 from datetime import date
+from urllib.parse import parse_qs
 
 import reflex as rx
 
@@ -146,6 +149,64 @@ class TransactionsState(rx.State):
 
     # ---- private helpers ----
 
+    def _url_qs(self) -> str:
+        """Build a URL query string that encodes the current filter/sort/page state."""
+        parts: list[tuple[str, str]] = []
+        if self.filter_date_from:
+            parts.append(("date_from", self.filter_date_from))
+        if self.filter_date_to:
+            parts.append(("date_to", self.filter_date_to))
+        for aid in self.filter_account_ids:
+            parts.append(("account", aid))
+        for t in self.filter_types:
+            parts.append(("type", t))
+        for cid in self.filter_category_ids:
+            parts.append(("category", cid))
+        for rs in self.filter_review_states:
+            parts.append(("review", rs))
+        if self.filter_search:
+            parts.append(("search", self.filter_search))
+        if self.filter_show_rejected_deleted:
+            parts.append(("show_rejected", "1"))
+        if self.sort != "date_desc":
+            parts.append(("sort", self.sort))
+        if self.current_page != 0:
+            parts.append(("page", str(self.current_page)))
+        if self.page_size != _DEFAULT_PAGE_SIZE:
+            parts.append(("page_size", str(self.page_size)))
+        return urllib.parse.urlencode(parts)
+
+    def _push_url(self):
+        """Return a call_script action that syncs the browser URL to current state."""
+        qs = self._url_qs()
+        path = f"/transactions?{qs}" if qs else "/transactions"
+        return rx.call_script(f"window.history.replaceState(null, '', {json.dumps(path)})")
+
+    def _parse_url_params(self) -> None:
+        """Read URL query params from the current request and apply them to filter state."""
+        query = self.router.url.query  # raw query string, no leading '?'
+        params = parse_qs(query, keep_blank_values=False)
+
+        self.filter_date_from = params.get("date_from", [""])[0]
+        self.filter_date_to = params.get("date_to", [""])[0]
+        self.filter_account_ids = params.get("account", [])
+        self.filter_types = params.get("type", [])
+        self.filter_category_ids = params.get("category", [])
+        self.filter_review_states = params.get("review", [])
+        self.filter_search = params.get("search", [""])[0]
+        self.filter_show_rejected_deleted = params.get("show_rejected", [""])[0] == "1"
+        sort = params.get("sort", ["date_desc"])[0]
+        self.sort = sort if sort in ("date_asc", "date_desc", "amount_asc", "amount_desc") else "date_desc"
+        try:
+            self.current_page = max(0, int(params.get("page", ["0"])[0]))
+        except ValueError:
+            self.current_page = 0
+        try:
+            ps = int(params.get("page_size", [str(_DEFAULT_PAGE_SIZE)])[0])
+            self.page_size = ps if ps in PAGE_SIZES else _DEFAULT_PAGE_SIZE
+        except ValueError:
+            self.page_size = _DEFAULT_PAGE_SIZE
+
     def _build_filters(self) -> LedgerFilters:
         return LedgerFilters(
             date_from=date.fromisoformat(self.filter_date_from) if self.filter_date_from else None,
@@ -207,58 +268,72 @@ class TransactionsState(rx.State):
         """Fetch transactions using current filter state."""
         self._do_fetch()
 
+    @rx.event
+    def load_from_url(self):
+        """Apply URL query params to filter/sort/page state before initial fetch."""
+        self._parse_url_params()
+        yield self._push_url()
+
     # ---- filter setters — each resets to page 0 and re-fetches ----
 
     @rx.event
-    def set_filter_date_from(self, val: str) -> None:
+    def set_filter_date_from(self, val: str):
         self.filter_date_from = val
         self.current_page = 0
         self._do_fetch()
+        yield self._push_url()
 
     @rx.event
-    def set_filter_date_to(self, val: str) -> None:
+    def set_filter_date_to(self, val: str):
         self.filter_date_to = val
         self.current_page = 0
         self._do_fetch()
+        yield self._push_url()
 
     @rx.event
-    def set_filter_account_ids(self, val: list[str]) -> None:
+    def set_filter_account_ids(self, val: list[str]):
         self.filter_account_ids = val
         self.current_page = 0
         self._do_fetch()
+        yield self._push_url()
 
     @rx.event
-    def set_filter_types(self, val: list[str]) -> None:
+    def set_filter_types(self, val: list[str]):
         self.filter_types = val
         self.current_page = 0
         self._do_fetch()
+        yield self._push_url()
 
     @rx.event
-    def set_filter_category_ids(self, val: list[str]) -> None:
+    def set_filter_category_ids(self, val: list[str]):
         self.filter_category_ids = val
         self.current_page = 0
         self._do_fetch()
+        yield self._push_url()
 
     @rx.event
-    def set_filter_review_states(self, val: list[str]) -> None:
+    def set_filter_review_states(self, val: list[str]):
         self.filter_review_states = val
         self.current_page = 0
         self._do_fetch()
+        yield self._push_url()
 
     @rx.event
-    def set_filter_search(self, val: str) -> None:
+    def set_filter_search(self, val: str):
         self.filter_search = val
         self.current_page = 0
         self._do_fetch()
+        yield self._push_url()
 
     @rx.event
-    def toggle_show_rejected_deleted(self, checked: bool) -> None:
+    def toggle_show_rejected_deleted(self, checked: bool):
         self.filter_show_rejected_deleted = checked
         self.current_page = 0
         self._do_fetch()
+        yield self._push_url()
 
     @rx.event
-    def clear_filters(self) -> None:
+    def clear_filters(self):
         self.filter_date_from = ""
         self.filter_date_to = ""
         self.filter_account_ids = []
@@ -269,23 +344,26 @@ class TransactionsState(rx.State):
         self.filter_show_rejected_deleted = False
         self.current_page = 0
         self._do_fetch()
+        yield self._push_url()
 
     # ---- pagination / sort ----
 
     @rx.event
-    def prev_page(self) -> None:
+    def prev_page(self):
         if self.has_prev_page:
             self.current_page -= 1
             self._do_fetch()
+            yield self._push_url()
 
     @rx.event
-    def next_page(self) -> None:
+    def next_page(self):
         if self.has_next_page:
             self.current_page += 1
             self._do_fetch()
+            yield self._push_url()
 
     @rx.event
-    def set_page_size(self, val: str) -> None:
+    def set_page_size(self, val: str):
         try:
             size = int(val)
         except ValueError:
@@ -295,16 +373,19 @@ class TransactionsState(rx.State):
         self.page_size = size
         self.current_page = 0
         self._do_fetch()
+        yield self._push_url()
 
     @rx.event
-    def toggle_sort_date(self) -> None:
+    def toggle_sort_date(self):
         self.sort = "date_asc" if self.sort == "date_desc" else "date_desc"
         self._do_fetch()
+        yield self._push_url()
 
     @rx.event
-    def toggle_sort_amount(self) -> None:
+    def toggle_sort_amount(self):
         self.sort = "amount_asc" if self.sort == "amount_desc" else "amount_desc"
         self._do_fetch()
+        yield self._push_url()
 
 
 # ---------------------------------------------------------------------------
@@ -806,7 +887,11 @@ def _error_banner() -> rx.Component:
 @rx.page(
     route="/transactions",
     title="Transactions | Home Finance",
-    on_load=[TransactionsState.load_options, TransactionsState.fetch_transactions],
+    on_load=[
+        TransactionsState.load_options,
+        TransactionsState.load_from_url,
+        TransactionsState.fetch_transactions,
+    ],
 )
 def transactions() -> rx.Component:
     return shell(
