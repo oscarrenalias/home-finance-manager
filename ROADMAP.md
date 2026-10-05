@@ -5,7 +5,7 @@
 | Topic | Decision |
 |---|---|
 | Auth | None for now — app is internal/home-only |
-| Categories | YAML config file (`config/categories.yaml`); restart to retune; not stored in DB |
+| Categories | YAML config file (`src/config/categories.yaml`); restart to retune; not stored in DB |
 | LLM stack | LangChain + LiteLLM (OpenAI-compatible endpoints) |
 | LiteLLM | docker-compose sidecar |
 | Deployment | docker-compose: migrate init container, app container, worker container, LiteLLM sidecar |
@@ -18,10 +18,10 @@
 Goal: a working end-to-end slice that validates the full stack (Reflex, import pipeline, LangChain/LiteLLM classification) before layering features on top.
 
 ### Infrastructure & scaffold
-- [ ] Reflex project structure (`ui/`, `domain/`, `services/`, `storage/`, `llm/`, `jobs/`, `tests/`)
+- [ ] Reflex project structure (`src/ui/`, `src/domain/`, `src/services/`, `src/storage/`, `src/llm/`, `src/jobs/`, `src/config/`, `tests/`)
 - [ ] SQLAlchemy models + Alembic migrations (Account, ImportBatch, SourceObservation, Transaction, Classification, TransferLink, Job, AuditEvent)
 - [ ] docker-compose: migrate init container (runs `alembic upgrade head`), Reflex app, background worker, LiteLLM sidecar
-- [ ] `config/categories.yaml` — initial taxonomy with model guidance and examples
+- [ ] `src/config/categories.yaml` — initial taxonomy with model guidance and examples
 - [ ] Synthetic fixture data for tests (never use `sample-data/` in committed tests)
 
 ### CSV import
@@ -37,7 +37,7 @@ Goal: a working end-to-end slice that validates the full stack (Reflex, import p
 
 ### Classification
 - [ ] LangChain + LiteLLM integration: structured output (type, category ID, merchant, rationale, ambiguity flag)
-- [ ] Categories loaded from `config/categories.yaml` at startup; injected into classification prompt
+- [ ] Categories loaded from `src/config/categories.yaml` at startup; injected into classification prompt
 - [ ] Background job: enqueue classification after import commit
 - [ ] Manual category correction on a transaction; correction persists after reimport and model reruns
 - [ ] Classification precedence: manual override → rules → LLM suggestion → unknown
@@ -132,7 +132,7 @@ Goal: a working end-to-end slice that validates the full stack (Reflex, import p
 
 ---
 
-## Category taxonomy (initial — `config/categories.yaml`)
+## Category taxonomy (initial — `src/config/categories.yaml`)
 
 Seed set based on the spec and observed sample data:
 
