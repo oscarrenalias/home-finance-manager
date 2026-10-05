@@ -25,7 +25,9 @@ dependencies = [
     "python-dotenv>=1.2.4",
 ]
 
-[project.optional-dependencies]
+# A dependency group (not an optional extra) so plain `uv sync` installs it in
+# every worktree; the Docker image uses `uv sync --no-dev` and excludes it.
+[dependency-groups]
 dev = [
     "pytest>=8.0.0,<9.0",
     "pytest-asyncio>=0.23.0,<1.0",

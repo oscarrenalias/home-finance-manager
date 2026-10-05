@@ -79,6 +79,10 @@ def app_server(tmp_path_factory):
 
     env = {**os.environ, "DATABASE_URL": db_url, "IMPORT_FILES_DIR": str(imports_dir)}
 
+    # Keep the server output so a page compile error is reported instead of a bare timeout.
+    log_path = tmp_path_factory.mktemp("reflex") / "reflex.log"
+    log_file = open(log_path, "w")
+
     proc = subprocess.Popen(
         [
             "uv", "run", "reflex", "run",
@@ -88,8 +92,8 @@ def app_server(tmp_path_factory):
         ],
         cwd=_PROJECT_ROOT,
         env=env,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+        stdout=log_file,
+        stderr=subprocess.STDOUT,
         start_new_session=True,  # isolate into its own process group for clean teardown
     )
 
@@ -97,6 +101,8 @@ def app_server(tmp_path_factory):
     deadline = time.monotonic() + 90
     ready = False
     while time.monotonic() < deadline:
+        if proc.poll() is not None:
+            break  # server exited (e.g. a page failed to compile); no point waiting
         try:
             urllib.request.urlopen(base_url, timeout=2)
             ready = True
@@ -110,11 +116,17 @@ def app_server(tmp_path_factory):
 
     if not ready:
         _kill_group(proc)
-        pytest.fail(f"Reflex did not become ready on port {frontend_port} within 90s")
+        log_file.close()
+        tail = "\n".join(log_path.read_text(errors="replace").splitlines()[-40:])
+        pytest.fail(
+            f"Reflex did not become ready on port {frontend_port} within 90s "
+            f"(exit code {proc.returncode}). Last server output:\n{tail}"
+        )
 
     yield base_url
 
     _kill_group(proc)
+    log_file.close()
 
 
 @pytest.fixture(scope="session")
