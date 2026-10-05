@@ -474,6 +474,16 @@ class ImportService:
                 session.add(audit)
                 session.commit()
 
+                # Insert classify_batch job in a separate commit so the worker
+                # sees fully-committed batch rows when it acquires the job.
+                classify_batch_job = Job(
+                    kind="classify_batch",
+                    state="pending",
+                    inputs={"batch_id": str(batch.id)},
+                )
+                session.add(classify_batch_job)
+                session.commit()
+
                 return CommitResult(
                     batch_id=batch.id,
                     new_transactions=new_transactions,

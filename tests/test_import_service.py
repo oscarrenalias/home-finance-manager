@@ -660,3 +660,53 @@ class TestPostImportRuleApplication:
             assert session.query(Classification).count() == 0
         finally:
             session.close()
+
+
+# ---------------------------------------------------------------------------
+# classify_batch job enqueue — verify Job row with kind=classify_batch after commit
+# ---------------------------------------------------------------------------
+
+
+class TestClassifyBatchJobEnqueue:
+    def test_commit_inserts_classify_batch_job(self, svc, session_factory, account):
+        """commit() always inserts exactly one Job row with kind=classify_batch."""
+        p = svc.preview(account.id, "a.csv", _csv(_row()), None, None, False)
+        r = svc.commit(account.id, p.idempotency_token, p, None, None, False)
+
+        session = session_factory()
+        try:
+            jobs = session.query(Job).filter(Job.kind == "classify_batch").all()
+            assert len(jobs) == 1
+            assert jobs[0].state == "pending"
+            assert jobs[0].inputs["batch_id"] == r.batch_id
+        finally:
+            session.close()
+
+    def test_commit_inserts_classify_batch_job_even_for_empty_import(self, svc, session_factory, account):
+        """classify_batch job is inserted even when the CSV has no new transactions."""
+        p = svc.preview(account.id, "a.csv", _csv(), None, None, False)
+        r = svc.commit(account.id, p.idempotency_token, p, None, None, False)
+        assert r.new_transactions == 0
+
+        session = session_factory()
+        try:
+            count = session.query(Job).filter(Job.kind == "classify_batch").count()
+            assert count == 1
+        finally:
+            session.close()
+
+    def test_idempotent_commit_does_not_insert_second_classify_batch_job(self, svc, session_factory, account):
+        """Calling commit() twice with the same idempotency_token inserts only one classify_batch job.
+
+        The early return in _commit_result_from_batch prevents any second insert.
+        """
+        p = svc.preview(account.id, "a.csv", _csv(_row()), None, None, False)
+        svc.commit(account.id, p.idempotency_token, p, None, None, False)
+        svc.commit(account.id, p.idempotency_token, p, None, None, False)
+
+        session = session_factory()
+        try:
+            count = session.query(Job).filter(Job.kind == "classify_batch").count()
+            assert count == 1
+        finally:
+            session.close()
