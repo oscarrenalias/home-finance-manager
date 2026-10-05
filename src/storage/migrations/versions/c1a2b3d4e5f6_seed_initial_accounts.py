@@ -21,8 +21,9 @@ _NOW = datetime(2026, 10, 4, 0, 0, 0)
 def upgrade() -> None:
     op.execute(
         sa.text(
-            "INSERT OR IGNORE INTO accounts (id, name, role, currency, active, created_at, updated_at) "
-            "VALUES (:id, :name, :role, :currency, :active, :created_at, :updated_at)"
+            "INSERT INTO accounts (id, name, role, currency, active, created_at, updated_at) "
+            "VALUES (:id, :name, :role, :currency, :active, :created_at, :updated_at) "
+            "ON CONFLICT (id) DO NOTHING"
         ).bindparams(
             id=str(uuid.uuid5(uuid.NAMESPACE_DNS, "home-finances.common")),
             name="Common account",
@@ -35,8 +36,9 @@ def upgrade() -> None:
     )
     op.execute(
         sa.text(
-            "INSERT OR IGNORE INTO accounts (id, name, role, currency, active, created_at, updated_at) "
-            "VALUES (:id, :name, :role, :currency, :active, :created_at, :updated_at)"
+            "INSERT INTO accounts (id, name, role, currency, active, created_at, updated_at) "
+            "VALUES (:id, :name, :role, :currency, :active, :created_at, :updated_at) "
+            "ON CONFLICT (id) DO NOTHING"
         ).bindparams(
             id=str(uuid.uuid5(uuid.NAMESPACE_DNS, "home-finances.accrual")),
             name="Accrual account",
