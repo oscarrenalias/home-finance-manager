@@ -6,26 +6,24 @@ A private, self-hosted web application for understanding household finances from
 
 **Prerequisites:** Docker and Docker Compose installed.
 
-1. Copy the environment file and add your OpenAI API key:
+1. Copy the environment file and fill in the required values:
 
    ```sh
    cp .env.example .env
-   # Edit .env and set OPENAI_API_KEY
+   # Edit .env — at minimum set OPENAI_API_KEY
    ```
 
-2. Start all services:
+2. Build images and start all services (PostgreSQL, migrations, app, worker, LiteLLM):
 
    ```sh
-   docker-compose up -d
+   docker-compose up --build -d
    ```
 
-3. Run database migrations inside the running app container:
+   The `migrate` service runs `alembic upgrade head` automatically before the app starts. You do not need to run migrations manually.
 
-   ```sh
-   docker-compose exec app uv run alembic upgrade head
-   ```
+3. Open the app at [http://localhost:3000](http://localhost:3000).
 
-4. Open the app at [http://localhost:3000](http://localhost:3000).
+   The first start takes a minute while Reflex compiles the frontend.
 
 To stop:
 
@@ -33,7 +31,7 @@ To stop:
 docker-compose down
 ```
 
-Data persists in named Docker volumes (`db_data`, `import_files`). To reset completely:
+Data persists in named Docker volumes (`pg_data`, `import_files`). To reset completely (drops all data):
 
 ```sh
 docker-compose down -v
@@ -41,7 +39,9 @@ docker-compose down -v
 
 ## Running Migrations
 
-Migrations are managed with Alembic. The migration scripts live in `src/storage/migrations/versions/`.
+Migrations are managed with Alembic. Scripts live in `src/storage/migrations/versions/`.
+
+In the Docker Compose stack, the `migrate` service runs migrations automatically on every `docker-compose up`. You only need to run Alembic manually for local development or when iterating on schema changes.
 
 Apply all pending migrations:
 
@@ -55,19 +55,24 @@ Roll back one migration:
 uv run alembic downgrade -1
 ```
 
-Show current revision:
+Show current revision / history:
 
 ```sh
 uv run alembic current
-```
-
-Show migration history:
-
-```sh
 uv run alembic history
 ```
 
-The `DATABASE_URL` environment variable controls which database is targeted. If unset, defaults to `sqlite:///./home_finances.db` in the working directory.
+### DATABASE_URL convention
+
+The `DATABASE_URL` environment variable controls which database is targeted:
+
+| Context | Value |
+| --- | --- |
+| Docker Compose (production) | `postgresql://finances:finances@db:5432/finances` (set in `.env`) |
+| Local development (no Docker) | Not set — falls back to `sqlite:///./home_finances.db` in the working directory |
+| Automated tests | Not set — tests create and migrate a temporary SQLite file; no Postgres needed |
+
+The fallback default is `sqlite:///./home_finances.db`. `psycopg2-binary` is installed as a runtime dependency so the same image works against PostgreSQL without any additional system packages.
 
 ## Running Tests
 
@@ -85,7 +90,7 @@ Run the full test suite:
 uv run pytest
 ```
 
-Tests use a temporary SQLite database created and migrated automatically by the session-scoped fixture in `tests/conftest.py`. No running services are required. Do not point tests at `sample-data/`; use synthetic fixtures only.
+Tests use a temporary SQLite database created and migrated automatically by the session-scoped fixture in `tests/conftest.py`. **No running Postgres instance is required** — the test suite always uses SQLite regardless of the `DATABASE_URL` environment variable. Do not point tests at `sample-data/`; use synthetic fixtures only.
 
 ## Module Overview
 
