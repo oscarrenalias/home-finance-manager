@@ -44,7 +44,8 @@ services:
         condition: service_started
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/ping"]
+      # Reflex 0.9 prod mode serves frontend and backend on the single frontend port.
+      test: ["CMD", "curl", "-f", "http://localhost:3000/ping"]
       interval: 30s
       timeout: 10s
       retries: 3
