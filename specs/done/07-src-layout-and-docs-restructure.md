@@ -1,6 +1,6 @@
 ---
 id: spec-07-src-layout-and-docs-restructure
-status: planned
+status: done
 ---
 
 # Source Layout and Docs Restructure
