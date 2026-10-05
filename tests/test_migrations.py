@@ -86,6 +86,93 @@ def test_reimport_upgrade_downgrade_upgrade(fresh_db):
     assert ALL_TABLES == _table_names(fresh_db)
 
 
+def _column_names(db_url: str, table: str) -> set[str]:
+    engine = create_engine(db_url, connect_args={"check_same_thread": False})
+    try:
+        return {c["name"] for c in inspect(engine).get_columns(table)}
+    finally:
+        engine.dispose()
+
+
+# ---------------------------------------------------------------------------
+# AC-15 — note columns migration (f1a2b3c4d5e6)
+# ---------------------------------------------------------------------------
+
+
+def test_upgrade_to_head_adds_note_columns(fresh_db):
+    """AC-15: upgrading to head (f1a2b3c4d5e6) adds note + note_updated_at."""
+    command.upgrade(_make_alembic_cfg(fresh_db), "f1a2b3c4d5e6")
+    cols = _column_names(fresh_db, "transactions")
+    assert "note" in cols
+    assert "note_updated_at" in cols
+
+
+def test_downgrade_minus_one_removes_note_columns(fresh_db):
+    """AC-15: downgrade -1 from f1a2b3c4d5e6 removes both note columns."""
+    cfg = _make_alembic_cfg(fresh_db)
+    command.upgrade(cfg, "f1a2b3c4d5e6")
+    command.downgrade(cfg, "-1")
+    cols = _column_names(fresh_db, "transactions")
+    assert "note" not in cols
+    assert "note_updated_at" not in cols
+
+
+def test_single_alembic_head(fresh_db):
+    """AC-15: alembic history has exactly one head (f1a2b3c4d5e6)."""
+    from alembic.script import ScriptDirectory
+
+    cfg = _make_alembic_cfg(fresh_db)
+    script = ScriptDirectory.from_config(cfg)
+    heads = script.get_heads()
+    assert heads == ["f1a2b3c4d5e6"]
+
+
+def test_existing_rows_survive_upgrade_with_null_notes(fresh_db):
+    """AC-15: rows inserted before upgrade have note=NULL and note_updated_at=NULL after upgrade."""
+    import uuid as _uuid
+
+    cfg = _make_alembic_cfg(fresh_db)
+    command.upgrade(cfg, "e4f5a6b7c8d9")
+
+    engine = create_engine(fresh_db, connect_args={"check_same_thread": False})
+    acct_id = str(_uuid.uuid4())
+    tx_id = str(_uuid.uuid4())
+    with engine.connect() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO accounts (id, name, role, currency, active, created_at, updated_at) "
+                "VALUES (:id, 'Test', 'common', 'EUR', 1, datetime('now'), datetime('now'))"
+            ),
+            {"id": acct_id},
+        )
+        conn.execute(
+            text(
+                "INSERT INTO transactions (id, account_id, date, amount_cents, currency, "
+                "original_text, display_text, status, created_at, updated_at) "
+                "VALUES (:id, :acct, '2026-01-01', -100, 'EUR', 'X', 'X', 'Executed', "
+                "datetime('now'), datetime('now'))"
+            ),
+            {"id": tx_id, "acct": acct_id},
+        )
+        conn.commit()
+    engine.dispose()
+
+    command.upgrade(cfg, "f1a2b3c4d5e6")
+
+    engine2 = create_engine(fresh_db, connect_args={"check_same_thread": False})
+    try:
+        with engine2.connect() as conn:
+            row = conn.execute(
+                text("SELECT note, note_updated_at FROM transactions WHERE id = :id"),
+                {"id": tx_id},
+            ).fetchone()
+        assert row is not None
+        assert row[0] is None
+        assert row[1] is None
+    finally:
+        engine2.dispose()
+
+
 def test_fk_classifications_transaction_id_enforced(fresh_db):
     cfg = _make_alembic_cfg(fresh_db)
     command.upgrade(cfg, "e4f5a6b7c8d9")
