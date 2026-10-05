@@ -89,6 +89,8 @@ class Transaction(Base):
     classification_version: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=func.now(), onupdate=func.now())
+    note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    note_updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
     account: Mapped[Account] = relationship("Account", back_populates="transactions")
     source_observations: Mapped[list[SourceObservation]] = relationship(
