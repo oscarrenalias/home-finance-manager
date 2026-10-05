@@ -26,8 +26,8 @@ def temp_db():
 
     alembic_cfg = Config(_PROJECT_ROOT / "alembic.ini")
     alembic_cfg.set_main_option("sqlalchemy.url", db_url)
-    # Use explicit SQLite-chain head; "head" is ambiguous with the postgres branch root.
-    command.upgrade(alembic_cfg, "e4f5a6b7c8d9")
+    # Use explicit SQLite-chain head; single chain now ends at f1a2b3c4d5e6.
+    command.upgrade(alembic_cfg, "f1a2b3c4d5e6")
 
     yield db_url
 

@@ -54,6 +54,41 @@ tests/         synthetic fixtures and behavioral tests
 
 Domain modules must be importable without Reflex. Never keep an open SQLAlchemy session in UI state or across an LLM network call.
 
+### Key service modules
+
+**`src/services/transaction_query.py`** — shared read layer for the transaction ledger. Exposes:
+- `LedgerFilters` — frozen dataclass encoding all filter dimensions (date range, account, type, category, review state, free-text search, include-rejected flag).
+- `list_transactions(session, filters, sort, page, page_size) → LedgerPage` — paginated, filtered, sorted query; all filtering is in SQL via bound parameters (no full-table loads). `page_size` must be one of `PAGE_SIZES = (20, 50, 100)`.
+- `get_transaction_detail(session, transaction_id) → TransactionDetail | None` — full detail including source observations, classification history, transfer links, and note.
+- `get_current_classification(session, transaction_id) → Classification | None` — shared helper that returns the active Classification: the accepted row if one exists, otherwise the newest non-rejected row (so a manual override beats a later model rerun, A11). Used by both the ledger and the Review page so they always agree.
+- `set_note(session, transaction_id, note) → None` — set or clear a transaction note. Strips whitespace, stores NULL for empty, raises `ValueError` for notes exceeding 2000 characters or when the transaction is not found.
+
+**Note field constraints:**
+- Maximum 2000 characters (validated in `set_note` before any DB write).
+- An `AuditEvent` with `action="note_updated"` is written on every actual change; no write occurs when the new value equals the existing value.
+- Stored directly on the `Transaction` row (`note` + `note_updated_at` columns); survives reimport because import deduplication matches on transaction identity, not note content.
+- The `search` filter in `LedgerFilters` performs case-insensitive substring matching across `display_text`, `merchant`, and `note`.
+
+### Transactions page URL filter convention
+
+`/transactions` makes all filter, sort, and pagination state addressable via URL query parameters. Any link that sets filters should build the URL with these params so the state is bookmarkable and shareable.
+
+| Param | Type | Values / notes |
+|---|---|---|
+| `date_from` | `YYYY-MM-DD` | Inclusive lower bound |
+| `date_to` | `YYYY-MM-DD` | Inclusive upper bound |
+| `account` | repeatable | Account ID strings; repeat for multiple |
+| `type` | repeatable | Transaction type strings; repeat for multiple |
+| `category` | repeatable | Category ID strings; `__none__` matches uncategorised |
+| `review` | repeatable | `accepted` \| `needs_review` \| `unclassified` |
+| `search` | string | Case-insensitive substring; applied to display_text, merchant, note |
+| `show_rejected` | `0` \| `1` | `1` includes Rejected/Deleted bank-status rows |
+| `sort` | string | `date_desc` (default) \| `date_asc` \| `amount_desc` \| `amount_asc` |
+| `page` | integer | 0-indexed page number |
+| `page_size` | integer | Must be one of `20`, `50`, `100` |
+
+The page applies these params on `on_load` via `TransactionsState.load_from_url()` and mirrors the current state back to the URL after every filter change using `window.history.replaceState` (no page reload).
+
 ## Money rules
 
 - Store all amounts as **signed integer cents** — no floats anywhere in financial logic
