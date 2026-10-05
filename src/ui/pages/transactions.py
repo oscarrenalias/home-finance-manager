@@ -17,6 +17,7 @@ from services.transaction_query import (
     TransactionDetail,
     get_transaction_detail,
     list_transactions,
+    set_note,
 )
 from storage.database import _get_session_factory
 from storage.models import Account
@@ -125,6 +126,10 @@ class TransactionsState(rx.State):
     edit_merchant: str = ""
     detail_save_error: str = ""
 
+    # ---- note editor ----
+    note_editor_text: str = ""
+    note_save_error: str = ""
+
     # ---- computed vars ----
 
     @rx.var
@@ -164,6 +169,18 @@ class TransactionsState(rx.State):
     @rx.var
     def has_transfer_links(self) -> bool:
         return len(self.detail_transfer_links) > 0
+
+    @rx.var
+    def note_char_count(self) -> int:
+        return len(self.note_editor_text)
+
+    @rx.var
+    def note_over_limit(self) -> bool:
+        return len(self.note_editor_text) > 2000
+
+    @rx.var
+    def note_counter_label(self) -> str:
+        return f"{len(self.note_editor_text)}/2000"
 
     @rx.var
     def has_filters(self) -> bool:
@@ -285,6 +302,8 @@ class TransactionsState(rx.State):
         self.edit_category_id = ""
         self.edit_merchant = ""
         self.detail_save_error = ""
+        self.note_editor_text = ""
+        self.note_save_error = ""
 
     def _apply_detail(self, d: TransactionDetail) -> None:
         """Apply a TransactionDetail to state vars; does not touch selected_transaction_id."""
@@ -340,6 +359,7 @@ class TransactionsState(rx.State):
         self.detail_note_updated_at = (
             d.note_updated_at.strftime("%d.%m.%Y %H:%M") if d.note_updated_at else ""
         )
+        self.note_editor_text = d.note or ""
         # Pre-fill edit form from the active classification values on the detail
         self.edit_type = d.transaction_type or ""
         self.edit_category_id = d.category_id or "__none__"
@@ -417,6 +437,53 @@ class TransactionsState(rx.State):
             self._do_fetch()
         except Exception as exc:
             self.detail_save_error = str(exc)
+            session.rollback()
+        finally:
+            session.close()
+
+    # ---- note events ----
+
+    @rx.event
+    def set_note_editor_text(self, val: str) -> None:
+        self.note_editor_text = val
+
+    @rx.event
+    def save_note(self) -> None:
+        if not self.selected_transaction_id:
+            return
+        if len(self.note_editor_text) > 2000:
+            self.note_save_error = "Note must not exceed 2000 characters."
+            return
+        self.note_save_error = ""
+        session = _get_session_factory()()
+        try:
+            set_note(session, self.selected_transaction_id, self.note_editor_text)
+            session.commit()
+            d = get_transaction_detail(session, self.selected_transaction_id)
+            if d is not None:
+                self._apply_detail(d)
+            self._do_fetch()
+        except Exception as exc:
+            self.note_save_error = str(exc)
+            session.rollback()
+        finally:
+            session.close()
+
+    @rx.event
+    def clear_note(self) -> None:
+        if not self.selected_transaction_id:
+            return
+        self.note_save_error = ""
+        session = _get_session_factory()()
+        try:
+            set_note(session, self.selected_transaction_id, None)
+            session.commit()
+            d = get_transaction_detail(session, self.selected_transaction_id)
+            if d is not None:
+                self._apply_detail(d)
+            self._do_fetch()
+        except Exception as exc:
+            self.note_save_error = str(exc)
             session.rollback()
         finally:
             session.close()
@@ -938,6 +1005,85 @@ def _edit_classification_form() -> rx.Component:
     )
 
 
+def _note_editor_panel() -> rx.Component:
+    """Note editor section shown inside the detail panel."""
+    return rx.vstack(
+        rx.text("Note", weight="medium", size="2", margin_bottom="0.25em"),
+        rx.text_area(
+            value=TransactionsState.note_editor_text,
+            on_change=TransactionsState.set_note_editor_text,
+            placeholder="Add a note…",
+            data_testid="note-input",
+            rows="4",
+            width="100%",
+            resize="vertical",
+        ),
+        rx.flex(
+            rx.text(
+                TransactionsState.note_counter_label,
+                size="1",
+                color_scheme=rx.cond(TransactionsState.note_over_limit, "red", "gray"),
+            ),
+            width="100%",
+        ),
+        rx.cond(
+            TransactionsState.note_over_limit,
+            rx.text(
+                "Note must not exceed 2000 characters.",
+                color="red",
+                size="2",
+                data_testid="note-error",
+            ),
+            rx.fragment(),
+        ),
+        rx.cond(
+            TransactionsState.note_save_error != "",
+            rx.text(
+                TransactionsState.note_save_error,
+                color="red",
+                size="2",
+            ),
+            rx.fragment(),
+        ),
+        rx.cond(
+            TransactionsState.detail_note_updated_at != "",
+            rx.text(
+                "Last edited: " + TransactionsState.detail_note_updated_at,
+                size="1",
+                color_scheme="gray",
+                data_testid="note-last-edited",
+            ),
+            rx.fragment(),
+        ),
+        rx.flex(
+            rx.button(
+                "Save",
+                on_click=TransactionsState.save_note,
+                data_testid="note-save-btn",
+                size="2",
+                disabled=TransactionsState.note_over_limit,
+            ),
+            rx.button(
+                "Clear",
+                on_click=TransactionsState.clear_note,
+                data_testid="note-clear-btn",
+                size="2",
+                variant="soft",
+                color_scheme="gray",
+            ),
+            gap="0.75em",
+            align="center",
+        ),
+        gap="0.5em",
+        align_items="start",
+        width="100%",
+        padding_top="1.25em",
+        border_top="1px solid var(--gray-4)",
+        margin_top="1.25em",
+        data_testid="note-editor",
+    )
+
+
 def _detail_panel() -> rx.Component:
     return rx.box(
         rx.flex(
@@ -1010,6 +1156,8 @@ def _detail_panel() -> rx.Component:
         ),
         # Edit classification form
         _edit_classification_form(),
+        # Note editor
+        _note_editor_panel(),
         # Transfer links section
         rx.text(
             "Transfer links",
